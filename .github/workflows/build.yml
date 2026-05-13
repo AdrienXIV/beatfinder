@@ -130,12 +130,17 @@ jobs:
         # vers Contents/Frameworks/ et on rewrite les paths en
         # @executable_path/../Frameworks/. Comme ça l'app fonctionne hors
         # ligne sans dépendance brew côté user.
+        #
+        # IMPORTANT : pas de flag -od (overwrite-dir) sinon dylibbundler
+        # WIPE le dossier Frameworks/ entier avant de copier ses dylibs.
+        # PyInstaller a déjà mis Python.framework + numpy + sqlalchemy etc.
+        # dans Frameworks/ — on veut juste AJOUTER les dylibs ffmpeg, pas
+        # remplacer le dossier.
         run: |
           brew install dylibbundler
           cp "$(which ffmpeg)"  dist/Beatfinder.app/Contents/MacOS/ffmpeg
           cp "$(which ffprobe)" dist/Beatfinder.app/Contents/MacOS/ffprobe
-          mkdir -p dist/Beatfinder.app/Contents/Frameworks
-          dylibbundler -od -b \
+          dylibbundler -b \
             -x dist/Beatfinder.app/Contents/MacOS/ffmpeg \
             -x dist/Beatfinder.app/Contents/MacOS/ffprobe \
             -d dist/Beatfinder.app/Contents/Frameworks/ \
