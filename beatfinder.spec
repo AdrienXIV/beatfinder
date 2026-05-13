@@ -9,10 +9,14 @@ Inclut :
 
 Build : pyinstaller beatfinder.spec
 Output: dist/beatfinder/beatfinder (binaire + dossier libs)
+        + dist/Beatfinder.app sur macOS (bundle natif avec icône Dock)
 """
+import sys
+
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
+IS_MAC = sys.platform == 'darwin'
 
 
 # Collect everything pour les libs sensibles (modèles, plugins, lazy imports)
@@ -136,7 +140,10 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=True,
+    # Sur macOS : console=False sinon Terminal s'ouvre quand on double-clic
+    # le .app depuis Finder. Sur Linux/Windows on garde console=True (logs
+    # uvicorn dans le terminal pour debug).
+    console=not IS_MAC,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -152,3 +159,23 @@ coll = COLLECT(
     upx=False,
     name='beatfinder',
 )
+
+# Sur macOS : génère aussi un bundle .app natif pour avoir l'icône dans
+# Dock/Launchpad et permettre double-clic Finder. L'icône .icns est générée
+# par le workflow CI (sips + iconutil) avant pyinstaller.
+if IS_MAC:
+    app = BUNDLE(
+        coll,
+        name='Beatfinder.app',
+        icon='packaging/Beatfinder.icns',
+        bundle_identifier='com.adrienmaillard.beatfinder',
+        info_plist={
+            'CFBundleName': 'Beatfinder',
+            'CFBundleDisplayName': 'Beatfinder',
+            'CFBundleShortVersionString': '2.0',
+            'CFBundleVersion': '2.0',
+            'LSMinimumSystemVersion': '11.0',
+            'NSHighResolutionCapable': True,
+            'LSUIElement': False,
+        },
+    )

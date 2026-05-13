@@ -79,7 +79,9 @@ def render(size: int) -> Image.Image:
 
 
 def main() -> None:
-    for size in (256, 512):
+    # 256 = AppImage / GNOME, 512 = fallback, 1024 = source pour .icns macOS
+    # (iconutil exige du @2x sur 512 donc 1024).
+    for size in (256, 512, 1024):
         img = render(size)
         path = OUT_DIR / (
             "beatfinder.png" if size == 256 else f"beatfinder-{size}.png"

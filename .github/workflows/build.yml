@@ -86,6 +86,28 @@ jobs:
           npm install
           npm run build
 
+      # ----- Generate .icns (macOS only, before PyInstaller) -----
+
+      - name: Generate Beatfinder.icns (macOS)
+        if: runner.os == 'macOS'
+        # PyInstaller BUNDLE attend packaging/Beatfinder.icns. On le génère
+        # à partir du PNG 1024px source en multiples résolutions via sips,
+        # puis on compile l'iconset en .icns via iconutil (natif macOS).
+        run: |
+          mkdir -p Beatfinder.iconset
+          SRC=packaging/beatfinder-1024.png
+          sips -z 16 16     "$SRC" --out Beatfinder.iconset/icon_16x16.png
+          sips -z 32 32     "$SRC" --out Beatfinder.iconset/icon_16x16@2x.png
+          sips -z 32 32     "$SRC" --out Beatfinder.iconset/icon_32x32.png
+          sips -z 64 64     "$SRC" --out Beatfinder.iconset/icon_32x32@2x.png
+          sips -z 128 128   "$SRC" --out Beatfinder.iconset/icon_128x128.png
+          sips -z 256 256   "$SRC" --out Beatfinder.iconset/icon_128x128@2x.png
+          sips -z 256 256   "$SRC" --out Beatfinder.iconset/icon_256x256.png
+          sips -z 512 512   "$SRC" --out Beatfinder.iconset/icon_256x256@2x.png
+          sips -z 512 512   "$SRC" --out Beatfinder.iconset/icon_512x512.png
+          cp "$SRC"               Beatfinder.iconset/icon_512x512@2x.png
+          iconutil -c icns Beatfinder.iconset -o packaging/Beatfinder.icns
+
       # ----- PyInstaller -----
 
       - name: PyInstaller
@@ -105,25 +127,23 @@ jobs:
         if: runner.os == 'macOS'
         # Sans signature ad-hoc, dyld refuse de charger les .dylib bundled
         # par PyInstaller sur macOS Sonoma+ ("library load disallowed by
-        # system policy"). On signe toutes les libs + le binaire principal.
-        # Le `-` = signature locale anonyme, pas besoin de cert Apple.
+        # system policy"). On signe toutes les libs + le bundle .app entier
+        # (--deep signe récursif). Le `-` = signature locale anonyme.
         run: |
-          find dist/beatfinder -type f \( -name '*.dylib' -o -name '*.so' \) \
+          find dist/Beatfinder.app -type f \( -name '*.dylib' -o -name '*.so' \) \
             -exec codesign --force --sign - {} +
-          codesign --force --deep --sign - dist/beatfinder/beatfinder
+          codesign --force --deep --sign - dist/Beatfinder.app
 
       - name: Package zip (macOS)
         if: runner.os == 'macOS'
         env:
           ARTIFACT: ${{ matrix.artifact }}
-        # On copie un launcher .command double-cliquable qui retire le
-        # quarantine flag (appliqué par macOS au téléchargement) puis lance
-        # le binaire. L'utilisateur n'a plus à taper xattr dans Terminal.
+        # On zip uniquement le bundle .app natif. L'utilisateur double-clique
+        # dessus depuis Finder (clic-droit > Ouvrir la 1ère fois car non-
+        # notarisé). Le .app apparaît dans le Dock avec l'icône Beatfinder.
         run: |
-          cp packaging/macos-launcher.command "dist/beatfinder/Lancer Beatfinder.command"
-          chmod +x "dist/beatfinder/Lancer Beatfinder.command"
           cd dist
-          zip -r "../$ARTIFACT" beatfinder
+          zip -ry "../$ARTIFACT" Beatfinder.app
 
       - name: Package zip (Windows)
         if: runner.os == 'Windows'
