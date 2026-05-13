@@ -1,0 +1,4 @@
+#!/bin/bash
+# Entry point AppImage : lance le binaire PyInstaller depuis usr/bin.
+HERE="$(dirname "$(readlink -f "${0}")")"
+exec "$HERE/usr/bin/beatfinder" "$@"

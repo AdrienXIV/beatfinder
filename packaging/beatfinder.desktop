@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Beatfinder
+GenericName=Audio Pattern Analyzer
+Comment=Analyseur de patterns audio pour beatmakers (BPM, tonalité, énergie, spectre)
+Exec=beatfinder
+Icon=beatfinder
+Categories=AudioVideo;Audio;Music;
+Terminal=false
+StartupNotify=true
+Keywords=beat;music;audio;analysis;spotify;production;
+X-AppImage-Integrate=false

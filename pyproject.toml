@@ -1,0 +1,92 @@
+[project]
+name = "beatfinder"
+version = "1.7.0"
+description = "Outil desktop d'analyse de patterns audio pour beatmakers : compare ton catalogue à des playlists de référence et sort un plan d'action mix/master/structure."
+requires-python = ">=3.12"
+authors = [{ name = "Adrien Maillard", email = "adrien.maillard97@gmail.com" }]
+readme = "README.md"
+
+# Tenu en parallèle de requirements.txt pour PyInstaller. La source de vérité
+# reste requirements.txt pour le build (beatfinder.spec). pyproject.toml sert
+# au tooling (ruff, pytest, mypy) et à `pip install -e .` en dev.
+dependencies = [
+    "fastapi>=0.115.0,<0.130.0",
+    "uvicorn[standard]>=0.32.0,<0.40.0",
+    "pydantic>=2.9.0,<3.0.0",
+    "pydantic-settings>=2.6.0,<3.0.0",
+    "spotipy>=2.24.0,<3.0.0",
+    "yt-dlp>=2024.10.0",
+    "librosa>=0.10.2,<0.12.0",
+    "soundfile>=0.12.1,<0.14.0",
+    "pyloudnorm>=0.1.1,<0.2.0",
+    "numpy>=1.26,<3",
+    "scipy>=1.13,<2",
+    "mutagen>=1.47,<2",
+    "python-multipart>=0.0.9,<1",
+    "SQLAlchemy>=2.0.0,<3.0.0",
+    "python-dotenv>=1.0.0,<2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0,<9.0.0",
+    "pytest-asyncio>=0.23.0,<1.0.0",
+    "ruff>=0.6.0,<1.0.0",
+    "mypy>=1.11.0,<2.0.0",
+]
+
+[project.scripts]
+beatfinder = "backend.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["frontend", "dist", "build", "data", ".venv", "packaging"]
+
+[tool.ruff.lint]
+# Démarrage prudent : E/F/W/I (bases) + UP (modernization) + BLE (validation
+# des noqa: BLE001 existants). Activer B/SIM/RUF plus tard quand le code aura
+# été nettoyé une première passe.
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "UP",   # pyupgrade
+    "BLE",  # flake8-blind-except (valide les noqa: BLE001 existants)
+]
+ignore = [
+    "E501",   # line-length géré par le formatter, pas par le linter
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*" = ["BLE001"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = ["-ra", "--strict-markers"]
+filterwarnings = [
+    "ignore::DeprecationWarning:librosa.*",
+    "ignore::DeprecationWarning:madmom.*",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = false
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+exclude = ["frontend", "dist", "build", "data", "packaging", "tests"]

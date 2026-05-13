@@ -1,0 +1,152 @@
+name: Build cross-platform binaries
+
+# Build automatique des binaries Linux / macOS / Windows à chaque tag `vX.Y.Z`.
+# Trigger manuel aussi via l'onglet Actions de GitHub (workflow_dispatch).
+# Le job `release` n'attache les artifacts à une GitHub Release que sur tag.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: beatfinder-linux-x86_64.AppImage
+            label: linux
+          - os: macos-14
+            artifact: beatfinder-macos-arm64.zip
+            label: macos-arm64
+          - os: macos-13
+            artifact: beatfinder-macos-x86_64.zip
+            label: macos-intel
+          - os: windows-latest
+            artifact: beatfinder-windows-x86_64.zip
+            label: windows
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          # Les builds actions/python-versions de CPython 3.12 sur Linux/macOS
+          # sont compilés avec --enable-shared par défaut → libpython3.12.so dispo,
+          # ce qui satisfait PyInstaller. Sur Windows, python3X.dll est natif.
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # ----- System deps -----
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg squashfs-tools
+
+      - name: Install system deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ffmpeg
+
+      - name: Install system deps (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ffmpeg -y --no-progress
+        shell: pwsh
+
+      # ----- Python deps -----
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip wheel cython
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Install madmom from git
+        # madmom n'a pas de release stable récente. On compile depuis main.
+        # Note Windows : peut nécessiter Visual C++ Build Tools (déjà sur runners GitHub).
+        run: pip install "madmom @ git+https://github.com/CPJKU/madmom@main"
+
+      # ----- Frontend -----
+
+      - name: Install + build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      # ----- PyInstaller -----
+
+      - name: PyInstaller
+        run: pyinstaller beatfinder.spec --clean --noconfirm
+
+      # ----- Package per OS -----
+
+      - name: Package AppImage (Linux)
+        if: runner.os == 'Linux'
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
+        run: |
+          ./scripts/build_appimage.sh
+          mv dist/beatfinder-x86_64.AppImage "$ARTIFACT"
+
+      - name: Package zip (macOS)
+        if: runner.os == 'macOS'
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
+        run: |
+          cd dist
+          zip -r "../$ARTIFACT" beatfinder
+
+      - name: Package zip (Windows)
+        if: runner.os == 'Windows'
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
+        run: Compress-Archive -Path dist/beatfinder -DestinationPath $env:ARTIFACT
+        shell: pwsh
+
+      # ----- Upload artifacts -----
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Beatfinder ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.AppImage
+            artifacts/**/*.zip

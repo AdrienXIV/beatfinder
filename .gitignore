@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# venv
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Env / data
+.env
+.spotify_cache*
+data/audio/
+data/settings.json
+data/reports/
+data/*.log
+data/*.db
+data/*.db-journal
+data/*.db-shm
+data/*.db-wal
+
+# Claude Code local config
+.claude/
+
+# Build artefacts
+build/
+dist/
+# *.spec mais on track beatfinder.spec qui est la conf PyInstaller du projet
+*.spec
+!beatfinder.spec
+spotify-pattern-analyzer
+spotify-pattern-analyzer.exe
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/

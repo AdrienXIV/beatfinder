@@ -1,0 +1,94 @@
+@import 'tailwindcss';
+
+@theme {
+	--color-bg: #0a0a0b;
+	--color-surface: #131316;
+	--color-surface-2: #1c1c21;
+	--color-border: #2a2a31;
+	--color-fg: #f5f5f7;
+	--color-fg-muted: #9a9aa3;
+	--color-accent: #f97316;
+	--color-accent-fg: #0a0a0b;
+	--color-warn: #facc15;
+	--color-ok: #10b981;
+	--color-err: #ef4444;
+
+	--font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+	--font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+html {
+	color-scheme: dark;
+}
+
+html,
+body {
+	background: var(--color-bg);
+	color: var(--color-fg);
+	font-family: var(--font-sans);
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+/* Le top-layer du <dialog> n'hérite pas du body, et le reset Tailwind écrase
+   le `margin: auto` natif → on rétablit la couleur de texte et le centrage. */
+dialog {
+	color: var(--color-fg);
+	margin: auto;
+}
+
+/* Tailwind v4 a retiré le `cursor: pointer` par défaut sur button — on remet. */
+button:not(:disabled),
+[role='button']:not(:disabled),
+summary {
+	cursor: pointer;
+}
+
+/* Print : élague la chrome (nav, boutons interactifs, tabs) pour ne garder que
+   le contenu (brief, charts, KPIs). Le browser convertit en PDF via Cmd+P. */
+@media print {
+	.no-print {
+		display: none !important;
+	}
+	/* Force color-scheme: light en print pour éviter que le browser
+	   dessine la zone @page margin avec le bg dark de la color-scheme. */
+	html {
+		color-scheme: light !important;
+	}
+	html,
+	body {
+		background: white !important;
+		color: black !important;
+	}
+	main {
+		padding: 0 !important;
+	}
+	@page {
+		margin: 1.5cm 1cm;
+	}
+	.print-page-break {
+		page-break-before: always;
+	}
+	/* Forcer les surfaces sombres à blanc pour économiser l'encre + lisibilité */
+	[class*='bg-[var(--color-surface'],
+	[class*='bg-[var(--color-bg'],
+	dialog {
+		background: white !important;
+		color: black !important;
+	}
+	[class*='text-[var(--color-fg-muted'] {
+		color: #555 !important;
+	}
+	[class*='text-[var(--color-fg'] {
+		color: black !important;
+	}
+	[class*='border-[var(--color-border'] {
+		border-color: #ccc !important;
+	}
+}
