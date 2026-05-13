@@ -134,7 +134,7 @@ exe = EXE(
     name='beatfinder',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=True,
+    strip=False,
     upx=False,
     console=True,
     disable_windowed_traceback=False,
@@ -148,7 +148,7 @@ coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
-    strip=True,
+    strip=False,
     upx=False,
     name='beatfinder',
 )

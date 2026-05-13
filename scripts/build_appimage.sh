@@ -29,9 +29,12 @@ if ! command -v mksquashfs >/dev/null 2>&1; then
   exit 1
 fi
 
-# Récupérer le runtime AppImage type 2 (ELF ~30 KB, charge le squashfs concaténé)
+# Récupérer le runtime AppImage type 2 (ELF léger, charge le squashfs concaténé)
+# On utilise `AppImageKit/continuous` (stable, compatible squashfuse système
+# anciens) avec compression xz côté mksquashfs. Le runtime `type2-runtime`
+# moderne est plus à jour mais fait planter squashfuse 0.5.2 (Ubuntu 20.04).
 if [[ ! -x "$RUNTIME" ]]; then
-  echo "→ téléchargement runtime AppImage"
+  echo "→ téléchargement runtime AppImage (AppImageKit/continuous, xz-only)"
   curl -sLo "$RUNTIME" \
     "https://github.com/AppImage/AppImageKit/releases/download/continuous/runtime-x86_64"
   chmod +x "$RUNTIME"
@@ -62,14 +65,17 @@ install -m 644 "$PACKAGING/beatfinder.png" "$APPDIR/beatfinder.png"
 install -m 644 "$PACKAGING/beatfinder.png" "$APPDIR/.DirIcon"
 install -m 644 "$PACKAGING/beatfinder.png" "$APPDIR/usr/share/icons/hicolor/256x256/apps/beatfinder.png"
 
-echo "→ mksquashfs (zstd, cap 2 cores + 1 GB RAM, low priority)"
-# -comp zstd : 3-5× moins de RAM que xz, ~2× plus rapide
+echo "→ mksquashfs (xz, cap 2 cores + 1 GB RAM, low priority)"
+# -comp xz : compression universellement supportée par tous les runtimes
+# AppImage (zstd cassait squashfuse 0.5.2 / FUSE 2 sur certaines distros).
+# Pas de -Xbcj x86 : le filtre BCJ désaligne certains ELFs (scipy openblas)
+# au mount FUSE → ImportError. Trade-off ~5 MB en plus mais robuste.
 # -processors 2 + -mem 1G : cap explicite pour éviter de saturer le système
 # -all-root : owner root (convention AppImage)
 # -no-progress : log propre dans le terminal
 # nice/ionice : laisse l'UI responsive
 nice -n 19 ionice -c3 mksquashfs "$APPDIR" "$SQUASHFS" \
-  -comp zstd -Xcompression-level 19 \
+  -comp xz \
   -processors 2 -mem 1G \
   -root-owned -noappend -no-progress
 
