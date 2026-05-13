@@ -288,12 +288,38 @@ def _open_browser_when_ready(host: str, port: int) -> None:
     """
     import http.client
     import subprocess
+    import sys
     import threading
     import time
     import webbrowser
 
     chromium = _find_app_window_browser()
     firefox = _find_firefox_browser() if chromium is None else None
+    profile_dir = Path.home() / ".beatfinder" / ".browser-profile"
+
+    def _watchdog_chrome_mac() -> None:
+        """Sur macOS, le binaire Chrome se détache de son parent (XPC vers
+        l'instance principale) → proc.wait() retourne tout de suite. On
+        surveille via pgrep si un process Chrome utilise notre profile-dir.
+        Quand plus aucun → la fenêtre Beatfinder est fermée → shutdown.
+        """
+        marker = str(profile_dir)
+        # Petit grace period le temps que Chrome démarre son process.
+        time.sleep(3)
+        while True:
+            try:
+                result = subprocess.run(
+                    ["pgrep", "-f", marker],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    log.info("Browser window closed (no chrome process) → shutting down server")
+                    os._exit(0)
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(2)
 
     def worker() -> None:
         url = f"http://{host}:{port}/"
@@ -314,12 +340,16 @@ def _open_browser_when_ready(host: str, port: int) -> None:
                                 stderr=subprocess.DEVNULL,
                                 start_new_session=True,
                             )
-                            # Watchdog : quand la fenêtre se ferme, on tue le
-                            # serveur uvicorn → l'app s'arrête proprement et le
-                            # port 8000 redevient libre. Sinon zombie process.
-                            proc.wait()
-                            log.info("Browser window closed → shutting down server")
-                            os._exit(0)
+                            if sys.platform == "darwin":
+                                # macOS : proc.wait() inutile (Chrome se détache).
+                                # On surveille via pgrep le profile-dir.
+                                _watchdog_chrome_mac()
+                            else:
+                                # Linux/Windows : proc.wait() bloque jusqu'à la
+                                # fermeture de la fenêtre (Chrome reste attaché).
+                                proc.wait()
+                                log.info("Browser window closed → shutting down server")
+                                os._exit(0)
                         except OSError as exc:
                             log.warning("Chromium --app failed: %s — fallback Firefox/webbrowser", exc)
                     if firefox is not None:
