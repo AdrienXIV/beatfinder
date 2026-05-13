@@ -19,7 +19,7 @@ jobs:
             artifact: beatfinder-linux-x86_64.AppImage
             label: linux
           - os: macos-14
-            artifact: beatfinder-macos-arm64.zip
+            artifact: beatfinder-macos-arm64.dmg
             label: macos-arm64
           # macos-13 (Intel) retiré : queue saturée côté GitHub runners (Apple
           # ramène progressivement le pool Intel). Macs Intel deviennent
@@ -153,17 +153,28 @@ jobs:
             -exec codesign --force --sign - {} +
           codesign --force --deep --sign - dist/Beatfinder.app
 
-      - name: Package zip (macOS)
+      - name: Package DMG (macOS)
         if: runner.os == 'macOS'
         env:
           ARTIFACT: ${{ matrix.artifact }}
-        # ditto au lieu de zip : préserve les permissions UNIX (bit exécutable),
-        # extended attributes (Finder labels), et resource forks. Avec zip
-        # standard, le bit +x se perdait au dézip côté Finder → permission
-        # denied au lancement. ditto est l'outil natif macOS pour ça.
+        # On crée un DMG (Disk Image macOS) qui préserve parfaitement les
+        # symlinks PyInstaller, permissions UNIX, xattrs et resource forks
+        # (ce que zip standard ET ditto -c cassaient). L'utilisateur monte
+        # le DMG, glisse Beatfinder.app dans le raccourci /Applications,
+        # éjecte, lance. UX classique macOS (Slack/VS Code/Discord font ça).
+        #
+        # On prépare d'abord un dossier source avec l'app + un alias vers
+        # /Applications, puis hdiutil crée le DMG compressé UDZO.
         run: |
-          cd dist
-          ditto -c -k --keepParent Beatfinder.app "../$ARTIFACT"
+          mkdir -p dmg-source
+          cp -R dist/Beatfinder.app dmg-source/
+          ln -s /Applications dmg-source/Applications
+          hdiutil create \
+            -volname Beatfinder \
+            -srcfolder dmg-source \
+            -ov \
+            -format UDZO \
+            "$ARTIFACT"
 
       - name: Package zip (Windows)
         if: runner.os == 'Windows'
