@@ -21,9 +21,9 @@ jobs:
           - os: macos-14
             artifact: beatfinder-macos-arm64.zip
             label: macos-arm64
-          - os: macos-13
-            artifact: beatfinder-macos-x86_64.zip
-            label: macos-intel
+          # macos-13 (Intel) retiré : queue saturée côté GitHub runners (Apple
+          # ramène progressivement le pool Intel). Macs Intel deviennent
+          # marginal de toute façon (>5 ans). Réactivable plus tard si besoin.
           - os: windows-latest
             artifact: beatfinder-windows-x86_64.zip
             label: windows
