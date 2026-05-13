@@ -101,11 +101,27 @@ jobs:
           ./scripts/build_appimage.sh
           mv dist/beatfinder-x86_64.AppImage "$ARTIFACT"
 
+      - name: Codesign ad-hoc (macOS)
+        if: runner.os == 'macOS'
+        # Sans signature ad-hoc, dyld refuse de charger les .dylib bundled
+        # par PyInstaller sur macOS Sonoma+ ("library load disallowed by
+        # system policy"). On signe toutes les libs + le binaire principal.
+        # Le `-` = signature locale anonyme, pas besoin de cert Apple.
+        run: |
+          find dist/beatfinder -type f \( -name '*.dylib' -o -name '*.so' \) \
+            -exec codesign --force --sign - {} +
+          codesign --force --deep --sign - dist/beatfinder/beatfinder
+
       - name: Package zip (macOS)
         if: runner.os == 'macOS'
         env:
           ARTIFACT: ${{ matrix.artifact }}
+        # On copie un launcher .command double-cliquable qui retire le
+        # quarantine flag (appliqué par macOS au téléchargement) puis lance
+        # le binaire. L'utilisateur n'a plus à taper xattr dans Terminal.
         run: |
+          cp packaging/macos-launcher.command "dist/beatfinder/Lancer Beatfinder.command"
+          chmod +x "dist/beatfinder/Lancer Beatfinder.command"
           cd dist
           zip -r "../$ARTIFACT" beatfinder
 
