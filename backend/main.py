@@ -169,17 +169,8 @@ def _find_app_window_browser() -> tuple[str, list[str]] | None:
     L'ordre privilégie Chromium → Chrome → Brave → Edge → Vivaldi.
     """
     import shutil
+    import sys
 
-    candidates = (
-        "chromium-browser",
-        "chromium",
-        "google-chrome",
-        "google-chrome-stable",
-        "brave-browser",
-        "microsoft-edge",
-        "microsoft-edge-stable",
-        "vivaldi",
-    )
     # Args partagés : profil isolé (n'interfère pas avec le Chrome perso de
     # l'utilisateur), WM_CLASS=Beatfinder pour que GNOME matche notre .desktop
     # et affiche l'icône Beatfinder dans la barre des tâches au lieu de Chrome.
@@ -194,6 +185,54 @@ def _find_app_window_browser() -> tuple[str, list[str]] | None:
         "--no-first-run",
         "--no-default-browser-check",
     ]
+
+    # macOS et Windows : Chrome/Brave/Edge ne sont pas dans $PATH, on doit
+    # checker les chemins .app standards explicitement.
+    if sys.platform == "darwin":
+        home_apps = Path.home() / "Applications"
+        path_candidates = (
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            str(home_apps / "Google Chrome.app/Contents/MacOS/Google Chrome"),
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+            str(home_apps / "Brave Browser.app/Contents/MacOS/Brave Browser"),
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
+        )
+        for path in path_candidates:
+            if Path(path).is_file():
+                return path, common_args
+    elif sys.platform == "win32":
+        program_files = (
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
+            Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
+            Path(os.environ.get("LocalAppData", r"")) if os.environ.get("LocalAppData") else None,
+        )
+        path_subpaths = (
+            r"Google\Chrome\Application\chrome.exe",
+            r"BraveSoftware\Brave-Browser\Application\brave.exe",
+            r"Microsoft\Edge\Application\msedge.exe",
+            r"Chromium\Application\chrome.exe",
+        )
+        for base in program_files:
+            if base is None:
+                continue
+            for sub in path_subpaths:
+                candidate = base / sub
+                if candidate.is_file():
+                    return str(candidate), common_args
+
+    # Linux + fallback : chercher dans $PATH
+    candidates = (
+        "chromium-browser",
+        "chromium",
+        "google-chrome",
+        "google-chrome-stable",
+        "brave-browser",
+        "microsoft-edge",
+        "microsoft-edge-stable",
+        "vivaldi",
+    )
     for cmd in candidates:
         path = shutil.which(cmd)
         if path:
@@ -210,6 +249,24 @@ def _find_firefox_browser() -> tuple[str, list[str]] | None:
     classique mais standalone.
     """
     import shutil
+    import sys
+
+    if sys.platform == "darwin":
+        mac_paths = (
+            "/Applications/Firefox.app/Contents/MacOS/firefox",
+            str(Path.home() / "Applications/Firefox.app/Contents/MacOS/firefox"),
+        )
+        for path in mac_paths:
+            if Path(path).is_file():
+                return path, ["--new-window", "{url}"]
+    elif sys.platform == "win32":
+        win_paths = (
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / r"Mozilla Firefox\firefox.exe",
+            Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / r"Mozilla Firefox\firefox.exe",
+        )
+        for path in win_paths:
+            if path.is_file():
+                return str(path), ["--new-window", "{url}"]
 
     candidates = ("firefox", "firefox-esr")
     for cmd in candidates:
