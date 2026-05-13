@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 from pathlib import Path
 
 from yt_dlp import YoutubeDL
@@ -57,6 +58,52 @@ def _detect_js_runtimes() -> dict[str, dict]:
 
 
 _JS_RUNTIMES = _detect_js_runtimes()
+
+
+def _locate_ffmpeg() -> str | None:
+    """Trouve ffmpeg sur la machine et retourne le dossier qui le contient.
+
+    yt-dlp accepte un dossier via `ffmpeg_location` (il y cherche ffmpeg ET
+    ffprobe). Ordre de priorité :
+      1. ffmpeg bundled à côté du binaire (cas .app macOS / AppImage Linux)
+      2. Paths Homebrew standards macOS (/opt/homebrew/bin pour ARM,
+         /usr/local/bin pour Intel) — utile car les .app GUI macOS héritent
+         d'un PATH minimal sans /opt/homebrew/bin.
+      3. shutil.which (PATH) — cas normal Linux/dev.
+    """
+    candidates: list[Path] = []
+
+    # 1. Bundle local (sys.executable / .. )
+    if getattr(sys, "frozen", False):
+        bundle_dir = Path(sys.executable).parent
+        candidates.append(bundle_dir / "ffmpeg")
+
+    # 2. Paths absolus connus (utile sur macOS GUI où PATH est minimal)
+    if sys.platform == "darwin":
+        candidates.extend([
+            Path("/opt/homebrew/bin/ffmpeg"),
+            Path("/usr/local/bin/ffmpeg"),
+        ])
+
+    for ffmpeg_path in candidates:
+        if ffmpeg_path.is_file():
+            return str(ffmpeg_path.parent)
+
+    # 3. PATH fallback
+    found = shutil.which("ffmpeg")
+    if found:
+        return str(Path(found).parent)
+    return None
+
+
+_FFMPEG_LOCATION = _locate_ffmpeg()
+if _FFMPEG_LOCATION:
+    logger.info("ffmpeg détecté : %s", _FFMPEG_LOCATION)
+else:
+    logger.warning(
+        "ffmpeg introuvable — l'extraction MP3 va échouer. "
+        "Installe ffmpeg (apt install ffmpeg / brew install ffmpeg)."
+    )
 
 
 class YouTubeSource:
@@ -163,6 +210,8 @@ class YouTubeSource:
             "logger": _YTDLPLogger(),
             "js_runtimes": _JS_RUNTIMES,
         }
+        if _FFMPEG_LOCATION:
+            opts["ffmpeg_location"] = _FFMPEG_LOCATION
         if self._cookies_file:
             opts["cookiefile"] = self._cookies_file
         with YoutubeDL(opts) as ydl:

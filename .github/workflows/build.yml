@@ -123,12 +123,31 @@ jobs:
           ./scripts/build_appimage.sh
           mv dist/beatfinder-x86_64.AppImage "$ARTIFACT"
 
+      - name: Bundle ffmpeg into .app (macOS)
+        if: runner.os == 'macOS'
+        # On copie ffmpeg + ffprobe (installés via brew) à côté du binaire
+        # principal, puis on bundle leurs dylibs externes via dylibbundler
+        # vers Contents/Frameworks/ et on rewrite les paths en
+        # @executable_path/../Frameworks/. Comme ça l'app fonctionne hors
+        # ligne sans dépendance brew côté user.
+        run: |
+          brew install dylibbundler
+          cp "$(which ffmpeg)"  dist/Beatfinder.app/Contents/MacOS/ffmpeg
+          cp "$(which ffprobe)" dist/Beatfinder.app/Contents/MacOS/ffprobe
+          mkdir -p dist/Beatfinder.app/Contents/Frameworks
+          dylibbundler -od -b \
+            -x dist/Beatfinder.app/Contents/MacOS/ffmpeg \
+            -x dist/Beatfinder.app/Contents/MacOS/ffprobe \
+            -d dist/Beatfinder.app/Contents/Frameworks/ \
+            -p "@executable_path/../Frameworks/"
+
       - name: Codesign ad-hoc (macOS)
         if: runner.os == 'macOS'
         # Sans signature ad-hoc, dyld refuse de charger les .dylib bundled
         # par PyInstaller sur macOS Sonoma+ ("library load disallowed by
         # system policy"). On signe toutes les libs + le bundle .app entier
-        # (--deep signe récursif). Le `-` = signature locale anonyme.
+        # (--deep signe récursif, ramasse aussi ffmpeg/ffprobe bundled).
+        # Le `-` = signature locale anonyme.
         run: |
           find dist/Beatfinder.app -type f \( -name '*.dylib' -o -name '*.so' \) \
             -exec codesign --force --sign - {} +
