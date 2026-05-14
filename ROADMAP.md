@@ -1,11 +1,11 @@
 # Beatfinder — Roadmap
 
-État actuel : **V2.0 — features étendues**. Toutes les killer features livrées :
-plan d'action 4 modes, presets standards, PDF Chromium fidélité 100% (4 styles),
-radar triangulaire 2-5 sources, ML classifier de style, export DAW master chain
-(markdown universel + .adg Ableton expérimental), onboarding 1er lancement.
-Packaging desktop AppImage Linux 177 MB. CI cross-platform GitHub Actions prêt
-à être branché (workflow YAML).
+État actuel : **V2.0.14 — distribution cross-platform livrée**. CI GitHub
+Actions actif (repo privé `AdrienXIV/beatfinder`), Release v2.0.14 avec
+3 binaires natifs : Linux AppImage 193 MB, macOS arm64 DMG 194 MB (Beatfinder
+.app double-cliquable avec icône Dock, ffmpeg/ffprobe bundlés zéro dep brew),
+Windows zip. Quentin (M4 Pro, Tahoe) confirme l'app marche bout-en-bout sur
+Mac.
 
 ## Sprints livrés
 
@@ -80,19 +80,102 @@ Tout livré dans la journée :
 - Légende anneaux : swatches colorés + label + valeur source→cible dans la modal Plan d'action
 - Style Vinyl supprimé (5 styles → 4)
 
+### Sprint 8 — V2.0.14 distribution cross-platform (2026-05-13 → 2026-05-14)
+
+Init repo Git + push sur `github.com/AdrienXIV/beatfinder` (privé) + workflow
+CI cross-platform actif. 14 tags itératifs pour debugger tous les pièges
+multi-OS, version finale stable. Quentin (M4 Pro Tahoe) valide en bout-en-bout
+côté Mac.
+
+**Init repo + premier push**
+
+- `.gitignore` durci : `data/settings.json` (Spotify creds) + `data/reports/`
+  + `data/*.log` + `.claude/` (config dev perso) ajoutés
+- 165 fichiers commits (sans secrets), branche `main`, remote SSH
+- Cleanup historique : tous les essais ratés (v2.0.0 → v2.0.13) supprimés
+  de GitHub. Seul `v2.0.14` reste comme Latest
+
+**CI debug — bugs résolus en cascade (chacun = 1 tag)**
+
+- **PyInstaller `strip=True`** corrompait l'alignement ELF de
+  `libscipy_openblas64_*.so` → `ImportError: ELF load command address/offset
+  not properly aligned` même hors AppImage. Fix : `strip=False` (+120 MB
+  sur le dist/)
+- **AppImage zstd + squashfuse 0.5.2 Ubuntu 20.04** : `fuse: memory
+  allocation failed`. Fix : runtime `AppImageKit/continuous` (stable) +
+  compression `xz` sans filtre `-Xbcj x86` (qui désalignait openblas pareil)
+- **`npm ci` strict sur runners macOS/Windows** : Tailwind v4 a des
+  `@tailwindcss/oxide-wasm32-wasi` optionalDeps emnapi non listées dans
+  le lock généré sur Linux. Fix : `npm install` à la place (moins strict)
+- **chart.js manquant des deps** : 4 fichiers Svelte l'importaient mais
+  jamais ajouté à `package.json`. Marchait localement par chance. Fix :
+  `npm install chart.js` proprement
+- **Pool runners macOS Intel (macos-13) saturé** côté GitHub Actions :
+  job queued 27+ min sans démarrer. Fix : retirer macos-13 du matrix
+  (gardé macos-14 arm64 only)
+
+**macOS — bundle .app natif + zéro friction user**
+
+- Generate `Beatfinder.icns` à la volée dans le workflow CI via `sips`
+  (multi-resolutions) + `iconutil` (compile iconset) depuis le PNG 1024px
+  source. `gen_icon.py` étendu pour produire 256/512/1024
+- PyInstaller `BUNDLE` block conditionnel `sys.platform == 'darwin'` →
+  vrai `Beatfinder.app` avec `Info.plist` (CFBundleName, Identifier
+  `com.adrienmaillard.beatfinder`, etc.), `console=False` côté Mac pour
+  pas pop Terminal au lancement
+- **Codesign ad-hoc** (`codesign --force --deep --sign -`) dans le workflow
+  pour signer toutes les `.dylib`/`.so` + le bundle : sans ça macOS Sonoma+
+  refuse de charger les libs ("library load disallowed by system policy")
+- **Détection Chrome/Brave/Edge sur Mac + Windows** : `shutil.which()`
+  cherchait dans `$PATH` mais Chrome est dans `/Applications/*.app/...`
+  (jamais dans `$PATH`). Sans ce fix l'app fallback sur Safari avec un
+  onglet URL visible. Maintenant fenêtre `--app` dédiée propre
+- **Watchdog Chrome via `pgrep`** sur Mac (vs `proc.wait()` qui retournait
+  130ms après le démarrage car Chrome se détache via XPC). On surveille
+  un process Chrome avec notre `--user-data-dir` toutes les 2s, shutdown
+  quand plus aucun
+- **ffmpeg + ffprobe bundlés** dans `Contents/MacOS/` via copie depuis
+  brew + `dylibbundler -of` (overwrite files only) qui bundle les dylibs
+  externes (libavformat, libswscale, libcrypto, etc.) dans
+  `Contents/Frameworks/` + rewrite des paths en
+  `@executable_path/../Frameworks/`. **Zéro `brew install ffmpeg` côté user**.
+  Détection robuste dans `youtube.py` : bundle local → `/opt/homebrew/bin`
+  → `/usr/local/bin` → `$PATH`
+- **DMG au lieu de zip** : `hdiutil create -format UDZO` produit une
+  Disk Image qui préserve symlinks PyInstaller, permissions UNIX, xattrs,
+  resource forks (que ditto ET zip standard cassaient). Inclut un alias
+  `/Applications` pour drag-and-drop. UX classique macOS (Slack/VS Code)
+- Pattern `*.dmg` ajouté au pattern d'upload de `softprops/action-gh-release`
+  (oublié initialement, le DMG était dans les artifacts mais pas attaché
+  à la Release)
+
+**Bugs critiques évités après livraison**
+
+- `dylibbundler -od` (overwrite-dir) WIPE le dossier `Frameworks/`
+  entier avant de copier ses dylibs. PyInstaller y avait mis
+  `Python.framework`, `numpy`, `sqlalchemy`, etc. → tout détruit, app
+  crashait avec `Failed to load Python shared library`. Fix : `-of`
+  (overwrite-files, fichier par fichier)
+- Conflit avec `libcrypto.3.dylib` déjà bundlée par PyInstaller via
+  `cryptography` Python → résolu par `-of`
+
 ## En attente / non-fait
 
-### Court terme (V1.8 finalisation)
+### Court terme — à reprendre demain
 
-- [ ] Tester binaire AppImage sur une machine vierge (sans `.venv` ni Python dev) — valide que les libs système suffisent (notamment ffmpeg + browser)
-- [ ] **Packaging macOS** : nécessite un Mac (`build.command`). PyInstaller peut générer un `.app` bundle. AppImage n'existe pas sur Mac → `.dmg` ou `.app` distribué via zip. **Le workflow CI GitHub Actions le fait automatiquement** dès qu'Adrien push le projet et tagge.
+- [ ] **Import Spotify sur Mac** : Quentin a remonté quelques logs
+  d'erreurs/succès partiels. À analyser pour identifier les tracks qui
+  échouent encore (matching durée, encoding, edge cases yt-dlp) et
+  corriger. Pas bloquant — l'app démarre, mais l'analyse ne traite pas
+  100% des tracks.
 
 ### Moyen terme (V1.9 / V2 validation)
 
 - [ ] **Test métier réel par Adrien** : remasteriser un de ses beats Kyu selon le plan d'action FR (LUFS +6 dB, sub -28 pts, mid +9.7 pts, centroid +1026 Hz), re-uploader, vérifier que les deltas se réduisent. Boucle de validation de la value-prop, seul item bloqué par Adrien lui-même.
 - [ ] **Étendre le ML classifier** : analyser des playlists drill / lo-fi / trap → ajouter à `LABEL_MAPPING` → re-run `train_classifier`. Modèle plus discriminant + couvre les styles hybrides comme Kyu (actuellement 56/44 entre rap-fr/us — vrai positif vu son côté trap français).
 - [ ] **Tester / itérer .adg Ableton** : ouvrir le fichier généré dans Live, voir si Live l'accepte. Si oui → étendre pour inclure les vrais devices Ableton (EQ8 / Compressor / Limiter pré-réglés). Si non → garder uniquement le markdown export.
-- [ ] **Brancher le CI cross-platform** : `git init` + commit + push GitHub + premier tag `v2.0.0`. Premier run peut révéler des bugs (madmom Windows compile, libpython.so sur Linux runners). 1-2h de debug attendus.
+- [ ] **Tester AppImage Linux sur machine vierge** (sans `.venv` ni Python dev) — valide que les libs système suffisent (ffmpeg + browser).
+- [ ] **Tester binaire Windows** sur une vraie machine Windows (build CI passe mais jamais lancé).
 
 ### Long terme (V2.1+)
 
@@ -108,7 +191,10 @@ Tout livré dans la journée :
 - **Pas de packaging cross-OS** : PyInstaller ne cross-compile pas. Pour distribuer, faire 1 build par plateforme. **Le CI GitHub Actions résout ça** (workflow YAML prêt).
 - **Mode dev** : `source .venv/bin/activate` casse Claude Code (security prompt). Toujours `./.venv/bin/<binaire>`.
 - **Bundle taille** : 459 MB dossier / **177 MB AppImage** après optimisations (zstd + strip + excludes). Inhérent au stack (librosa + madmom + sklearn + scipy ≈ 350 MB de libs scientifiques après strip). Réduction sous 150 MB possible mais risquée (exclure submodules scipy précis, UPX risqué avec numba).
-- **Watchdog Chromium** : si l'utilisateur tue Chrome via System Monitor, uvicorn ne s'arrête pas immédiatement. Léger délai. Acceptable.
+- **Watchdog Chromium** : si l'utilisateur tue Chrome via System Monitor, uvicorn ne s'arrête pas immédiatement. Léger délai. Acceptable. Sur Mac, le watchdog est par `pgrep` (polling 2s) vu que Chrome se détache via XPC.
+- **PyInstaller `strip=True`** corrompt `libscipy_openblas64_*.so`. Toujours `strip=False`. Coût : +120 MB sur le dist/, marginal sur le DMG/AppImage compressés.
+- **dylibbundler `-od`** wipe le dossier de destination. Toujours `-of` (overwrite files) quand on bundle dans un Frameworks/ déjà rempli par PyInstaller.
+- **macOS .app non-notarisé** : 1ère ouverture demande clic-droit > Ouvrir > confirmer (Gatekeeper). Inévitable sans cert Apple Developer (~100€/an + notarisation).
 - **Tauri Linux** : bloqué sur Ubuntu 20.04 par conflit PPA libxml2-dev vs PPA externe sury (PHP). Workaround = Ubuntu 22.04+, Fedora, ou downgrade libxml2 (risque casser PHP).
 - **ML classifier** : 74% CV accuracy avec seulement 2 classes (rap-fr / rap-us). Améliorable en analysant plus de playlists de styles distincts (drill, lo-fi, trap).
 - **Export .adg Ableton** : expérimental. Le XML respecte la structure publique connue mais sans test dans Live, validation incertaine. Le markdown reste le fallback fiable.
