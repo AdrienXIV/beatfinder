@@ -25,7 +25,7 @@ from backend.domain.models import (
     Track,
     TrackAnalysis,
 )
-from backend.report_generator import generate_brief, generate_csv
+from backend.report_generator import generate_brief
 from backend.services.pattern_extractor import extract_pattern
 from backend.types import LogCallback, ProgressCallback
 
@@ -235,11 +235,10 @@ def delete_project(
         shutil.rmtree(audio_dir, ignore_errors=True)
 
     fname = brief_filename(project_spotify_id)
-    for suffix in (".md", ".csv"):
-        path = data_dir / "reports" / f"{fname}{suffix}"
-        if path.is_file():
-            path.unlink()
-            deleted["n_briefs"] += 1
+    path = data_dir / "reports" / f"{fname}.md"
+    if path.is_file():
+        path.unlink()
+        deleted["n_briefs"] += 1
 
     return deleted
 
@@ -421,7 +420,6 @@ def run_local_pipeline(
             ))
 
         report_path: Path | None = None
-        csv_path: Path | None = None
         if pattern is not None:
             tracks_data = [
                 {"artist": r["artist"], "title": r["title"], "features": r["features"]}
@@ -431,14 +429,11 @@ def run_local_pipeline(
             brief_md = generate_brief(
                 pattern, playlist_name=playlist.name, tracks_data=tracks_data,
             )
-            csv_export = generate_csv(tracks_data)
             report_dir = data_dir / "reports"
             report_dir.mkdir(parents=True, exist_ok=True)
             fname = brief_filename(playlist.spotify_id)
             report_path = report_dir / f"{fname}.md"
             report_path.write_text(brief_md, encoding="utf-8")
-            csv_path = report_dir / f"{fname}.csv"
-            csv_path.write_text(csv_export, encoding="utf-8")
             _emit(f"Brief written: {report_path}")
 
         session.commit()
@@ -450,5 +445,4 @@ def run_local_pipeline(
             "n_reused": n_reused,
             "pattern": pattern,
             "report_path": str(report_path) if report_path else None,
-            "csv_path": str(csv_path) if csv_path else None,
         }

@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { api, ApiError } from '$lib/api';
 	import Button from './Button.svelte';
+	import ScrollLock from './ScrollLock.svelte';
 
 	let { onClose }: { onClose: () => void } = $props();
 
@@ -76,6 +77,8 @@
 	}
 </script>
 
+<ScrollLock open={true} />
+
 <div
 	class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
 	role="dialog"
@@ -108,8 +111,8 @@
 				<h3 class="text-2xl font-bold">Bienvenue dans Beatfinder.</h3>
 				<p class="text-sm text-[var(--color-fg-muted)] leading-relaxed">
 					Outil d'analyse de patterns audio pour beatmakers. Compare ton catalogue (Spotify
-					ou WAV/MP3 locaux) à des playlists de référence (rap FR, US, etc.) et sort un
-					plan d'action mastering / mix / rythme / tonalité / structure actionnable.
+					ou WAV/MP3 locaux) à des playlists de référence (de n'importe quel genre)
+					et sort un plan d'action mastering / mix / rythme / tonalité / structure actionnable.
 				</p>
 				<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4 space-y-2">
 					<h4 class="text-sm font-semibold">3 étapes pour démarrer :</h4>
@@ -201,8 +204,9 @@
 				<h3 class="text-xl font-bold">Analyse ta première playlist</h3>
 				<p class="text-sm text-[var(--color-fg-muted)]">
 					Lance une première analyse pour découvrir le workflow. On suggère
-					<strong>Top Rap FR Beatfinder</strong> (151 tracks, ~25 min) — playlist de
-					référence rap FR que tu pourras ensuite utiliser comme cible de comparaison.
+					<strong>Top Rap FR Beatfinder</strong> (151 tracks, ~25 min) — exemple de
+					playlist de référence que tu pourras ensuite utiliser comme cible de comparaison.
+					Tu peux aussi coller l'URL d'une autre playlist (de n'importe quel genre).
 				</p>
 				<div>
 					<label for="onb-url" class="block text-xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">

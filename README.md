@@ -171,3 +171,15 @@ Le frontend SPA est servi par FastAPI en prod (catch-all qui fallback sur `index
 ## Cadre légal
 
 Téléchargement audio via yt-dlp utilisé uniquement pour analyse locale dans un cadre privé (étude de patterns sonores pour beatmaking). Pas de redistribution.
+
+## Licence
+
+Tous droits réservés © Adrien Maillard. Le code de ce dépôt est mis à
+disposition pour consultation uniquement. Aucune licence d'utilisation,
+modification, copie ou redistribution n'est accordée. Les binaires des
+*Releases* sont librement téléchargeables pour usage personnel — mais le
+code source ne peut être réutilisé, forké à des fins de publication, ou
+redistribué sans autorisation écrite préalable.
+
+Les dépendances tierces (librosa, madmom, FastAPI, SvelteKit, yt-dlp, etc.)
+restent sous leurs licences respectives (majoritairement MIT/Apache/BSD).

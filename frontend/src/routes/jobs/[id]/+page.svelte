@@ -178,15 +178,46 @@
 	{/if}
 
 	{#if job.status === 'done' && job.result}
+		{@const skipped = (job.result.skipped ?? []) as Array<{
+			artist: string;
+			title: string;
+			reason: string;
+		}>}
+		{@const nAnalyzed = job.result.n_analyzed as number | undefined}
 		<Card class="mb-6">
 			<p class="font-medium mb-2">Résultat</p>
 			<div class="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm font-mono">
 				{#each Object.entries(job.result) as [k, v] (k)}
-					<span class="text-[var(--color-fg-muted)]">{k}</span>
-					<span class="truncate">{v ?? '—'}</span>
+					{#if k !== 'skipped'}
+						<span class="text-[var(--color-fg-muted)]">{k}</span>
+						<span class="truncate">{v ?? '—'}</span>
+					{/if}
 				{/each}
 			</div>
 		</Card>
+
+		{#if skipped.length > 0}
+			<Card class="mb-6 border-[var(--color-warn)]/40">
+				<p class="font-medium mb-2">
+					{skipped.length} track{skipped.length > 1 ? 's' : ''} retirée{skipped.length > 1
+						? 's'
+						: ''} du process
+				</p>
+				<p class="text-xs text-[var(--color-fg-muted)] mb-3">
+					Audio non récupérable depuis YouTube (aucun résultat acceptable :
+					blacklist, durée hors tolérance, ou erreur d'analyse). Le pattern de la
+					playlist est calculé sur les {nAnalyzed ?? '?'} tracks restantes.
+				</p>
+				<ul class="space-y-1 text-sm font-mono">
+					{#each skipped as s, i (i)}
+						<li class="flex flex-col">
+							<span class="text-[var(--color-fg)]">{s.artist} — {s.title}</span>
+							<span class="text-[var(--color-fg-muted)] text-xs pl-3">↳ {s.reason}</span>
+						</li>
+					{/each}
+				</ul>
+			</Card>
+		{/if}
 	{/if}
 
 	<div>

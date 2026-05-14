@@ -36,11 +36,7 @@ from backend.api.schemas import (
 from backend.local_projects import brief_filename
 from backend.services.action_planner import generate_action_items
 from backend.services import style_classifier
-from backend.services.daw_export import (
-    build_master_chain,
-    generate_ableton_adg,
-    generate_markdown,
-)
+from backend.services.daw_export import build_master_chain, generate_markdown
 from backend.services.source_loader import PatternSource, load_pattern_source
 from backend.services.threshold_presets import PRESET_ID_PREFIX, list_presets
 
@@ -157,29 +153,6 @@ def export_master_chain_md(
     return Response(
         content=md,
         media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
-
-
-@router.get("/actions/master-chain.adg")
-def export_master_chain_adg(
-    session: SessionDep,
-    data_dir: DataDirDep,
-    from_id: Annotated[str, Query(alias="from")],
-    to: Annotated[str, Query()],
-) -> Response:
-    """Génère un .adg Ableton (XML gzippé) de la chaîne master.
-
-    EXPÉRIMENTAL : rack vide nommé avec annotation des paramètres. À remplir
-    manuellement dans Live. Si Live refuse l'ouverture, utilise le .md.
-    """
-    plan = get_action_plan(session, data_dir, from_id, to)
-    chain = build_master_chain(plan)
-    blob = generate_ableton_adg(chain)
-    filename = f"{brief_filename(from_id)}__vs__{brief_filename(to)}-master-chain.adg"
-    return Response(
-        content=blob,
-        media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

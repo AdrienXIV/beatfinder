@@ -16,6 +16,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from backend import __version__
 from backend.api.deps import get_data_dir, get_session
 from backend.api.schemas import (
     AppStatusOut,
@@ -23,6 +24,7 @@ from backend.api.schemas import (
     CacheStatsOut,
     SpotifySettingsIn,
     SpotifySettingsOut,
+    UpdateCheckOut,
 )
 from backend.infrastructure.settings_store import (
     SpotifyCreds,
@@ -31,6 +33,7 @@ from backend.infrastructure.settings_store import (
     save_spotify,
 )
 from backend.services.cache_inspector import FLUSHABLE, flush_cache, get_cache_stats
+from backend.services.update_check import check_for_update
 
 log = logging.getLogger("backend.api.routes_settings")
 
@@ -70,7 +73,30 @@ def _to_out(creds: SpotifyCreds) -> SpotifySettingsOut:
 def get_status(data_dir: DataDirDep) -> AppStatusOut:
     """Status léger pour le frontend (banners de config manquante)."""
     s = load_settings(data_dir)
-    return AppStatusOut(spotify_configured=s.spotify.is_configured)
+    return AppStatusOut(
+        spotify_configured=s.spotify.is_configured,
+        version=__version__,
+    )
+
+
+@router.get("/version/check", response_model=UpdateCheckOut)
+def get_update_check() -> UpdateCheckOut:
+    """Compare la version courante à la dernière release GitHub.
+
+    Endpoint séparé de `/settings/status` car appel réseau (peut être lent
+    ou rate-limited). Le frontend cache la réponse côté client pour ne pas
+    spammer GitHub à chaque navigation. Si pas de réseau / API down →
+    `update_available=False` silencieusement.
+    """
+    result = check_for_update()
+    return UpdateCheckOut(
+        current=result.current,
+        latest=result.latest,
+        update_available=result.update_available,
+        release_url=result.release_url,
+        release_notes=result.release_notes,
+        published_at=result.published_at,
+    )
 
 
 @router.get("/settings/spotify", response_model=SpotifySettingsOut)

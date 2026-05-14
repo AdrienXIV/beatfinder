@@ -23,16 +23,22 @@
 			{#if label}{label}{:else}—{/if}
 		</span>
 		<span class="font-mono tabular-nums whitespace-nowrap">
-			{displayCurrent}/{total}
 			{#if total > 0}
+				{displayCurrent}/{total}
 				<span class="text-[var(--color-fg-muted)] ml-1">({pct.toFixed(0)}%)</span>
+			{:else}
+				<span class="text-[var(--color-fg-muted)]">…</span>
 			{/if}
 		</span>
 	</div>
 	<div class="h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-surface-2)]">
-		<div
-			class="h-full bg-[var(--color-accent)] transition-[width] duration-300"
-			style="width: {pct}%"
-		></div>
+		{#if total > 0}
+			<div
+				class="h-full bg-[var(--color-accent)] transition-[width] duration-300"
+				style="width: {pct}%"
+			></div>
+		{:else}
+			<div class="h-full w-1/3 bg-[var(--color-accent)]/40 animate-pulse"></div>
+		{/if}
 	</div>
 </div>

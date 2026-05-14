@@ -1,8 +1,9 @@
 """Export DAW : génère une chaîne master à partir d'un plan d'action.
 
-2 formats :
-- Markdown descriptif (universel : Live, FL, Logic, Reaper, Pro Tools)
-- .adg Ableton (expérimental : XML gzippé, peut être refusé par Live selon version)
+Format unique : markdown descriptif universel (Live, FL, Logic, Reaper, Pro Tools).
+Le markdown est autonome (préambule, glossaire) pour qu'un humain ou un assistant
+IA puisse le lire sans contexte externe — même modèle que le brief de production
+(cf. `report_generator/brief.py`).
 
 Le mapping plan d'action → chaîne master :
 - LUFS / true peak / crest / DR → Compressor + Limiter
@@ -16,11 +17,12 @@ Heuristique d'ajustement EQ :
 """
 from __future__ import annotations
 
-import gzip
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
+
+from backend import __version__
 
 if TYPE_CHECKING:
     from backend.api.schemas import ActionPlanOut
@@ -193,129 +195,266 @@ def build_master_chain(plan: "ActionPlanOut") -> MasterChain:
 
 
 def generate_markdown(chain: MasterChain) -> str:
-    """Génère un guide markdown universel (Live / FL / Logic / Reaper)."""
-    lines: list[str] = []
-    lines.append(f"# Chaîne master Beatfinder")
-    lines.append("")
-    lines.append(f"**Source** : {chain.from_name}")
-    lines.append(f"**Cible** : {chain.to_name}")
-    lines.append(f"**Généré le** : {datetime.now(UTC).strftime('%Y-%m-%d %H:%M UTC')}")
-    lines.append("")
-    lines.append("> Applique cette chaîne sur ton bus master dans l'ordre. Les valeurs sont des points de départ basés sur l'écart médian entre ta source et la cible. Ajuste à l'oreille.")
-    lines.append("")
+    """Génère un guide markdown universel (Live / FL / Logic / Reaper).
 
-    # EQ
-    lines.append("## 1. EQ paramétrique 8 bandes")
-    lines.append("")
-    lines.append("Plugin natif (Ableton EQ8 / FL Parametric EQ 2 / Logic Channel EQ / FabFilter Pro-Q 3).")
-    lines.append("")
+    Structure alignée sur `report_generator/brief.py` :
+    préambule + métadonnées + comment lire + glossaire + sections + footer.
+    """
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    md: list[str] = []
+
+    def _intro(text: str) -> None:
+        """Intro vulgarisée en italique markdown pur (compatible parseurs)."""
+        md.append(f"*{text}*")
+        md.append("")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Header
+    # ─────────────────────────────────────────────────────────────────────
+    md.append("# Plan d'action Beatfinder — chaîne master")
+    md.append("")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # À propos
+    # ─────────────────────────────────────────────────────────────────────
+    md.append("## À propos de ce document")
+    md.append("")
+    md.append(
+        "**Beatfinder** est un outil d'analyse de patterns audio. Il compare "
+        "une source (track ou playlist) à une cible de référence et calcule "
+        "un **plan d'action mastering** (EQ + compression + limiteur) pour "
+        "aligner ta production sur le style de la cible."
+    )
+    md.append("")
+    md.append(
+        "Ce document est un **guide pas-à-pas universel**, applicable dans "
+        "n'importe quelle DAW (Ableton Live, FL Studio, Logic Pro, Reaper, "
+        "Pro Tools). Les valeurs proposées sont des points de départ basés "
+        "sur l'écart médian entre ta source et la cible — **ajuste à "
+        "l'oreille** en bypass A/B avec une track de la cible comme référence."
+    )
+    md.append("")
+    md.append(
+        "Destiné à un **beatmaker / producer**, ou à un **assistant IA** qui "
+        "l'accompagne (pour expliquer, résumer, répondre à des questions "
+        "techniques). Toutes les définitions techniques sont fournies dans "
+        "le glossaire ci-dessous."
+    )
+    md.append("")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Métadonnées
+    # ─────────────────────────────────────────────────────────────────────
+    md.append("## Métadonnées")
+    md.append("")
+    md.append("| Champ | Valeur |")
+    md.append("|---|---|")
+    md.append(f"| Source | {chain.from_name} |")
+    md.append(f"| Cible | {chain.to_name} |")
+    md.append(f"| Date de génération | {now} |")
+    md.append(f"| Version Beatfinder | {__version__} |")
+    md.append("")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Comment lire ce document
+    # ─────────────────────────────────────────────────────────────────────
+    md.append("## Comment lire ce document")
+    md.append("")
+    md.append(
+        "Les valeurs proposées (gain dB, threshold, ratio…) sont calculées "
+        "à partir de **l'écart médian entre la source et la cible** sur "
+        "chaque feature mesurée. Ce ne sont pas des règles absolues : "
+        "commence avec ces valeurs, puis ajuste à l'oreille."
+    )
+    md.append("")
+    md.append("**Ordre d'application sur ton bus master :**")
+    md.append("")
+    md.append(
+        "1. **EQ paramétrique 8 bandes** — corrige le profil spectral "
+        "(6 bandes mesurées par Beatfinder)"
+    )
+    md.append(
+        "2. **Compressor** — ajuste le crest factor (homogénéité dynamique "
+        "entre les passages forts et calmes)"
+    )
+    md.append(
+        "3. **Limiter** — pousse le LUFS au niveau de la cible (volume "
+        "compétitif streaming)"
+    )
+    md.append("")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # Glossaire
+    # ─────────────────────────────────────────────────────────────────────
+    md.append("## Glossaire")
+    md.append("")
+    md.append(
+        "*Termes techniques utilisés dans ce document. À consulter si une "
+        "définition manque.*"
+    )
+    md.append("")
+    md.append(
+        "- **EQ paramétrique** : égaliseur permettant de booster ou couper "
+        "des fréquences précises avec une largeur (Q) et un type (bell, "
+        "shelf, etc.)."
+    )
+    md.append(
+        "- **Bell** : courbe en cloche centrée sur une fréquence donnée. "
+        "Affecte aussi les fréquences voisines selon le Q."
+    )
+    md.append(
+        "- **Low-shelf / High-shelf** : booste ou coupe tout ce qui est "
+        "sous (low-shelf) ou au-dessus (high-shelf) d'une fréquence cible."
+    )
+    md.append(
+        "- **Q** (*Quality factor*) : largeur de la courbe EQ. Q bas = "
+        "courbe large (musical), Q haut = courbe étroite (chirurgical)."
+    )
+    md.append(
+        "- **Threshold** : niveau (en dBFS) au-dessus duquel un "
+        "compressor/limiter s'active."
+    )
+    md.append(
+        "- **Ratio** : agressivité de la compression. 2:1 = doux, 4:1 = "
+        "standard, 10:1+ = limiteur."
+    )
+    md.append(
+        "- **Attack** : temps de réaction du compressor (en ms). Court = "
+        "capture les transitoires ; long = laisse passer les attaques."
+    )
+    md.append(
+        "- **Release** : temps de relâchement (en ms). Court = compression "
+        "qui \"respire\" vite ; long = compression maintenue."
+    )
+    md.append(
+        "- **Makeup gain** : gain à rajouter en sortie du compressor pour "
+        "compenser la baisse de volume due à la compression."
+    )
+    md.append(
+        "- **Ceiling** : plafond absolu en dBFS que le limiter ne laissera "
+        "jamais dépasser."
+    )
+    md.append(
+        "- **Crest factor** : ratio peak/RMS du signal. Élevé = peu "
+        "compressé ; bas = compression marquée."
+    )
+    md.append(
+        "- **LUFS** (*Loudness Units Full Scale*) : mesure normalisée du "
+        "volume perçu (norme broadcast ITU BS.1770-4). Standard streaming : "
+        "-14 LUFS."
+    )
+    md.append("")
+    md.append("---")
+    md.append("")
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 1. EQ paramétrique 8 bandes
+    # ─────────────────────────────────────────────────────────────────────
+    md.append("## EQ paramétrique 8 bandes")
+    md.append("")
+    _intro(
+        "Première étape : corriger le profil spectral. Cette section liste "
+        "les ajustements bande par bande pour aligner ta source sur le "
+        "profil de la cible. Plugins natifs courants : Ableton EQ8, "
+        "FL Parametric EQ 2, Logic Channel EQ, FabFilter Pro-Q 3."
+    )
     if not chain.eq_bands or all(b.gain_db == 0 for b in chain.eq_bands):
-        lines.append("_Pas d'ajustement EQ nécessaire — ton profil spectral est déjà aligné._")
+        md.append(
+            "_Pas d'ajustement EQ nécessaire — ton profil spectral est "
+            "déjà aligné sur la cible._"
+        )
     else:
-        lines.append("| Bande | Fréquence | Type | Q | Gain | Notes |")
-        lines.append("|---|---|---|---|---|---|")
+        md.append("| Bande | Fréquence | Type | Q | Gain | Notes |")
+        md.append("|---|---|---|---|---|---|")
         for b in chain.eq_bands:
             gain_str = f"{b.gain_db:+.1f} dB" if b.gain_db != 0 else "0 dB (ON ref)"
-            lines.append(
-                f"| {b.label.replace('_', '-')} | {b.freq_hz:.0f} Hz | {b.band_type.replace('_', ' ')} | {b.q:.1f} | {gain_str} | {b.rationale or '—'} |"
+            md.append(
+                f"| {b.label.replace('_', '-')} | "
+                f"{b.freq_hz:.0f} Hz | "
+                f"{b.band_type.replace('_', ' ')} | "
+                f"{b.q:.1f} | "
+                f"{gain_str} | "
+                f"{b.rationale or '—'} |"
             )
-    lines.append("")
+    md.append("")
 
-    # Compressor
-    lines.append("## 2. Compressor")
-    lines.append("")
-    lines.append("Plugin natif (Ableton Glue / FL Maximus / Logic Compressor / FabFilter Pro-C 2).")
-    lines.append("")
+    # ─────────────────────────────────────────────────────────────────────
+    # 2. Compressor
+    # ─────────────────────────────────────────────────────────────────────
+    md.append("## Compressor")
+    md.append("")
+    _intro(
+        "Deuxième étape : ajuster la dynamique pour homogénéiser le mix. "
+        "Le compressor réduit l'écart entre les passages forts et calmes, "
+        "ce qui aide à pousser le LUFS sans dépasser le ceiling au "
+        "limiter. Plugins natifs courants : Ableton Glue, FL Maximus, "
+        "Logic Compressor, FabFilter Pro-C 2."
+    )
     if chain.compressor is None:
-        lines.append("_Pas de compression nécessaire — ton crest factor est déjà dans la cible._")
+        md.append(
+            "_Pas de compression nécessaire — ton crest factor est déjà "
+            "dans la cible._"
+        )
     else:
         c = chain.compressor
-        lines.append(f"- **Threshold** : {c.threshold_db:.1f} dBFS")
-        lines.append(f"- **Ratio** : {c.ratio:.1f} : 1")
-        lines.append(f"- **Attack** : {c.attack_ms:.0f} ms")
-        lines.append(f"- **Release** : {c.release_ms:.0f} ms (ou Auto)")
-        lines.append(f"- **Makeup gain** : {c.makeup_gain_db:+.1f} dB")
-        lines.append("")
-        lines.append(f"_{c.rationale}_")
-    lines.append("")
+        md.append(f"- **Threshold** : {c.threshold_db:.1f} dBFS")
+        md.append(f"- **Ratio** : {c.ratio:.1f} : 1")
+        md.append(f"- **Attack** : {c.attack_ms:.0f} ms")
+        md.append(f"- **Release** : {c.release_ms:.0f} ms (ou Auto)")
+        md.append(f"- **Makeup gain** : {c.makeup_gain_db:+.1f} dB")
+        md.append("")
+        md.append(f"_{c.rationale}_")
+    md.append("")
 
-    # Limiter
-    lines.append("## 3. Limiter")
-    lines.append("")
-    lines.append("Plugin natif (Ableton Limiter / FL Maximus / Logic Adaptive Limiter / FabFilter Pro-L 2).")
-    lines.append("")
+    # ─────────────────────────────────────────────────────────────────────
+    # 3. Limiter
+    # ─────────────────────────────────────────────────────────────────────
+    md.append("## Limiter")
+    md.append("")
+    _intro(
+        "Dernière étape : pousser le volume final au niveau de la cible. "
+        "Le limiter agit comme un compressor extrême (ratio infini) avec "
+        "un ceiling absolu qu'il ne dépasse jamais. C'est lui qui rend ta "
+        "track \"competitive\" en streaming. Plugins natifs courants : "
+        "Ableton Limiter, FL Maximus, Logic Adaptive Limiter, FabFilter "
+        "Pro-L 2."
+    )
     if chain.limiter is None:
-        lines.append("_Pas de limiteur nécessaire — ton LUFS est déjà à la cible._")
+        md.append(
+            "_Pas de limiteur nécessaire — ton LUFS est déjà à la cible._"
+        )
     else:
         lim = chain.limiter
-        lines.append(f"- **Input gain** : {lim.gain_db:+.1f} dB")
-        lines.append(f"- **Ceiling** : {lim.ceiling_db:.1f} dBFS")
-        lines.append(f"- **Release** : {lim.release_ms:.0f} ms")
-        lines.append("")
-        lines.append(f"_{lim.rationale}_")
-    lines.append("")
+        md.append(f"- **Input gain** : {lim.gain_db:+.1f} dB")
+        md.append(f"- **Ceiling** : {lim.ceiling_db:.1f} dBFS")
+        md.append(f"- **Release** : {lim.release_ms:.0f} ms")
+        md.append("")
+        md.append(f"_{lim.rationale}_")
+    md.append("")
 
-    # Notes
+    # ─────────────────────────────────────────────────────────────────────
+    # Notes (conditionnel)
+    # ─────────────────────────────────────────────────────────────────────
     if chain.notes:
-        lines.append("## Notes")
-        lines.append("")
+        md.append("## Notes")
+        md.append("")
+        _intro(
+            "Remarques contextuelles détectées par Beatfinder qui méritent "
+            "ton attention avant d'appliquer la chaîne."
+        )
         for n in chain.notes:
-            lines.append(f"- {n}")
-        lines.append("")
+            md.append(f"- {n}")
+        md.append("")
 
-    lines.append("---")
-    lines.append("")
-    lines.append("Généré par Beatfinder. La chaîne est un point de départ : valide à l'oreille.")
-    return "\n".join(lines)
-
-
-def generate_ableton_adg(chain: MasterChain) -> bytes:
-    """Génère un fichier .adg Ableton Audio Effect Rack (XML gzippé).
-
-    EXPÉRIMENTAL : Live peut refuser le fichier si la version XML schema ne match pas.
-    Le rack ne contient pas de devices Ableton réels (EQ8/Compressor/Limiter ont des
-    structures XML complexes propriétaires) — c'est un rack vide nommé qu'Adrien peut
-    remplir manuellement avec les paramètres du markdown.
-
-    Si Live refuse l'ouverture, utilise le markdown à la place.
-    """
-    chain_name = f"Beatfinder · {chain.from_name} → {chain.to_name}"
-    annotation = []
-    for b in chain.eq_bands:
-        if b.gain_db != 0:
-            annotation.append(f"{b.label}@{b.freq_hz:.0f}Hz {b.gain_db:+.1f}dB")
-    if chain.compressor:
-        annotation.append(f"Comp T={chain.compressor.threshold_db:.0f} R={chain.compressor.ratio:.0f}")
-    if chain.limiter:
-        annotation.append(f"Limit gain={chain.limiter.gain_db:+.1f} ceil={chain.limiter.ceiling_db:.1f}")
-    annotation_text = " | ".join(annotation) or "Pas d'ajustement"
-
-    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<Ableton MajorVersion="5" MinorVersion="11.0_433" SchemaChangeCount="3" Creator="Beatfinder">
-<GroupDevicePreset>
-  <OverwriteProtectionNumber Value="0"/>
-  <Device>
-    <AudioEffectGroupDevice>
-      <LomId Value="0"/>
-      <UserName Value="{_xml_escape(chain_name)}"/>
-      <Annotation Value="{_xml_escape(annotation_text)}"/>
-      <SourceContext>
-        <Value/>
-      </SourceContext>
-    </AudioEffectGroupDevice>
-  </Device>
-  <BranchPresets/>
-</GroupDevicePreset>
-</Ableton>
-"""
-    return gzip.compress(xml.encode("utf-8"))
-
-
-def _xml_escape(s: str) -> str:
-    return (
-        s.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&apos;")
+    # ─────────────────────────────────────────────────────────────────────
+    # Footer
+    # ─────────────────────────────────────────────────────────────────────
+    md.append("---")
+    md.append("")
+    md.append(
+        f"*Plan d'action généré par Beatfinder v{__version__} le {now}. "
+        "Les valeurs sont un point de départ — valide à l'oreille.*"
     )
+    md.append("")
+
+    return "\n".join(md)

@@ -65,13 +65,13 @@ def _interpret_lufs(lufs: float) -> str:
     if lufs > -16:
         return "streaming-friendly, moins compressé"
     if lufs > -20:
-        return "calme, atypique pour rap moderne"
+        return "calme, peu compressé"
     return "très calme, exotique"
 
 
 def _interpret_tp(tp: float) -> str:
     if tp > 0.5:
-        return "inter-sample clipping franc — signature trap moderne"
+        return "inter-sample clipping franc — master poussé en compétitivité streaming"
     if tp > -0.5:
         return "à la limite, clipping inter-sample possible"
     return "headroom positif, master propre"
@@ -94,7 +94,7 @@ def _interpret_onset(density: float) -> str:
         return "rythme moyen"
     if density < 6:
         return "rythme dense (1/16 plein, hats actifs)"
-    return "très dense (hat rolls, trap hats rapides)"
+    return "très dense (percussions rapides type hat rolls)"
 
 
 def _interpret_drop(ratio: float) -> str:
@@ -102,17 +102,17 @@ def _interpret_drop(ratio: float) -> str:
     if pct < 20:
         return "drop ultra-précoce, intro très courte (optimisé skip-rate streaming)"
     if pct < 35:
-        return "drop standard rap moderne"
+        return "drop standard, intro courte"
     if pct < 50:
         return "intro plus longue, structure classique"
-    return "drop tardif (atypique pour rap moderne)"
+    return "drop tardif (intro longue)"
 
 
 def _interpret_centroid(centroid: float) -> str:
     if centroid < 2000:
         return "très sombre"
     if centroid < 3500:
-        return "sombre (typique rap/trap)"
+        return "sombre"
     if centroid < 5000:
         return "équilibré"
     return "brillant"
@@ -145,8 +145,8 @@ def _spectral_profile_label(bands: dict) -> str:
     top_end = bands["high_mid"]["median"] + bands["high"]["median"]
     if low_end > 0.6:
         if top_end < 0.05:
-            return "low-end dominant + tops étouffés (trap/rap moderne textbook)"
+            return "low-end dominant + tops étouffés (basses très en avant, aigus retenus)"
         return "low-end dominant"
     if low_end > 0.45:
         return "low-end fort mais pas écrasant"
-    return "spectre plus équilibré (rare en trap)"
+    return "spectre équilibré (low-end pas dominant)"

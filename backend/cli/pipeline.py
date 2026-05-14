@@ -40,7 +40,7 @@ from backend.infrastructure.spotify_client import (
     SpotifyClient,
     TrackMeta,
 )
-from backend.report_generator import generate_brief, generate_csv
+from backend.report_generator import generate_brief
 from backend.services.pattern_extractor import extract_pattern
 from backend.types import LogCallback, ProgressCallback
 
@@ -249,6 +249,35 @@ def run_pipeline(
         _progress(idx, total, f"[{idx}/{total}] OK : {track_lbl}")
         track_rows.append(row)
 
+    skipped: list[dict[str, str]] = []
+    if analyze:
+        for row in track_rows:
+            if "features" in row:
+                continue
+            reason = (
+                row.get("download_error")
+                or row.get("analysis_error")
+                or "audio non disponible"
+            )
+            skipped.append({
+                "spotify_id": row.get("spotify_id", ""),
+                "artist": row.get("artist", ""),
+                "title": row.get("title", ""),
+                "reason": str(reason),
+            })
+
+        n_analyzed = total - len(skipped)
+        _emit("")
+        _emit("─── Rapport ───")
+        _emit(f"{total} tracks Spotify")
+        _emit(f"{n_analyzed} analysées avec succès")
+        if skipped:
+            _emit(f"{len(skipped)} retirées du process :")
+            for s in skipped:
+                _emit(f"  - {s['artist']} — {s['title']} : {s['reason']}")
+        else:
+            _emit("0 retirée du process")
+
     pattern: dict | None = None
     if analyze:
         _progress(total, total, "Extracting pattern…")
@@ -264,7 +293,6 @@ def run_pipeline(
         _persist(log, playlist_meta, tracks, track_rows, pattern)
 
     report_path: Path | None = None
-    csv_path: Path | None = None
     if pattern is not None:
         tracks_data = [
             {"artist": t.artist, "title": t.title, "features": r.get("features")}
@@ -277,20 +305,14 @@ def run_pipeline(
         brief_md = generate_brief(
             pattern, playlist_name=playlist_name, tracks_data=tracks_data,
         )
-        csv_export = generate_csv(tracks_data)
         playlist_id = SpotifyClient.parse_playlist_id(playlist_url)
         report_dir = get_settings().data_dir / "reports"
         report_dir.mkdir(parents=True, exist_ok=True)
         report_path = report_dir / f"{playlist_id}.md"
         report_path.write_text(brief_md, encoding="utf-8")
-        csv_path = report_dir / f"{playlist_id}.csv"
-        csv_path.write_text(csv_export, encoding="utf-8")
         _emit(f"Brief written: {report_path}")
-        _emit(f"CSV written: {csv_path}")
 
-    result: dict[str, Any] = {"tracks": track_rows}
-    if csv_path is not None:
-        result["csv_path"] = str(csv_path)
+    result: dict[str, Any] = {"tracks": track_rows, "skipped": skipped}
     if playlist_meta is not None:
         result["playlist"] = playlist_meta.as_dict()
         result["playlist_spotify_id"] = playlist_meta.spotify_id

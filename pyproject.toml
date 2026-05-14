@@ -1,6 +1,6 @@
 [project]
 name = "beatfinder"
-version = "1.7.0"
+version = "2.1.0"
 description = "Outil desktop d'analyse de patterns audio pour beatmakers : compare ton catalogue à des playlists de référence et sort un plan d'action mix/master/structure."
 requires-python = ">=3.12"
 authors = [{ name = "Adrien Maillard", email = "adrien.maillard97@gmail.com" }]

@@ -43,7 +43,7 @@
 		outline:
 			'border border-[var(--color-border)] text-[var(--color-fg)] hover:bg-[var(--color-surface-2)]',
 		destructive:
-			'border border-[var(--color-err)]/50 bg-[var(--color-err)]/10 text-[var(--color-err)] hover:bg-[var(--color-err)] hover:text-white hover:border-[var(--color-err)]'
+			'border border-[var(--color-err)] bg-[var(--color-err)]/20 text-[var(--color-err)] hover:bg-[var(--color-err)] hover:text-white'
 	};
 </script>
 

@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { goto, invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
-	import { api, ApiError, isLocalProject, type Brief } from '$lib/api';
+	import { api, ApiError, isLocalProject, type Brief, type TrackMeta } from '$lib/api';
 	import ActionPlanModal from '$lib/components/ActionPlanModal.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import ScrollLock from '$lib/components/ScrollLock.svelte';
+	import TrackCorrectionModal from '$lib/components/TrackCorrectionModal.svelte';
 	import Card from '$lib/components/Card.svelte';
 	import Stat from '$lib/components/Stat.svelte';
 	import Skeleton from '$lib/components/Skeleton.svelte';
@@ -56,8 +58,22 @@
 	let actionMsg = $state<string | null>(null);
 
 	let deleteDialog: HTMLDialogElement | null = $state(null);
+	let deleteDialogOpen = $state(false);
 	let deleting = $state(false);
 	let deleteError = $state<string | null>(null);
+
+	let correctionOpen = $state(false);
+	let correctionTrack = $state<TrackMeta | null>(null);
+	function openCorrection(t: TrackMeta) {
+		correctionTrack = t;
+		correctionOpen = true;
+	}
+	function closeCorrection() {
+		correctionOpen = false;
+	}
+	async function onCorrectionSaved() {
+		await invalidateAll();
+	}
 
 	function handleApiError(e: unknown): string {
 		if (e instanceof ApiError) return e.detail || e.message;
@@ -106,11 +122,13 @@
 	function openDeleteDialog() {
 		deleteError = null;
 		deleteDialog?.showModal();
+		deleteDialogOpen = true;
 	}
 
 	function closeDeleteDialog() {
 		if (deleting) return;
 		deleteDialog?.close();
+		deleteDialogOpen = false;
 	}
 
 	async function confirmDelete() {
@@ -215,7 +233,7 @@
 	</a>
 	<div class="flex items-end justify-between gap-4 flex-wrap">
 		<div>
-			<div class="flex items-center gap-2 mb-1">
+			<div class="flex items-center gap-x-2 gap-y-2 mb-2 flex-wrap">
 				{#if isLocal}
 					<Badge variant="accent">Local</Badge>
 				{:else}
@@ -243,8 +261,8 @@
 			>
 				Imprimer en PDF
 			</Button>
-			<Button href={api.briefCsvUrl(detail.spotify_id)} variant="outline">
-				Download CSV
+			<Button href={api.briefMdUrl(detail.spotify_id)} variant="outline">
+				Download .md
 			</Button>
 			<Button href="/compare?a={encodeURIComponent(detail.spotify_id)}" variant="outline">
 				Comparer
@@ -325,6 +343,8 @@
 			</Button>
 		</div>
 	</Card>
+
+	<ScrollLock open={deleteDialogOpen} />
 
 	<dialog
 		bind:this={deleteDialog}
@@ -519,6 +539,10 @@
 		<BriefRenderer markdown={brief.markdown} />
 	{/if}
 {:else if activeTab === 'tracks'}
+	{@const formatKey = (note: string | null, mode: 'major' | 'minor' | null) => {
+		if (!note || !mode) return '—';
+		return `${note} ${mode}`;
+	}}
 	<div class="overflow-x-auto rounded-lg border border-[var(--color-border)]">
 		<table class="w-full text-sm">
 			<thead class="bg-[var(--color-surface-2)] text-xs uppercase tracking-wider text-[var(--color-fg-muted)]">
@@ -526,8 +550,11 @@
 					<th class="px-3 py-2 text-left w-12">#</th>
 					<th class="px-3 py-2 text-left">Artist</th>
 					<th class="px-3 py-2 text-left">Title</th>
+					<th class="px-3 py-2 text-right w-20">BPM</th>
+					<th class="px-3 py-2 text-right w-28">Key</th>
 					<th class="px-3 py-2 text-right">Duration</th>
 					<th class="px-3 py-2 text-center">Analyzed</th>
+					<th class="px-3 py-2 text-center w-8" title="Corriger BPM / Tonalité"></th>
 					<th class="px-3 py-2 text-right w-32">Action</th>
 				</tr>
 			</thead>
@@ -539,6 +566,22 @@
 						</td>
 						<td class="px-3 py-2 truncate max-w-[180px]">{t.artist || '—'}</td>
 						<td class="px-3 py-2 truncate max-w-[280px]">{t.title}</td>
+						<td class="px-3 py-2 text-right font-mono tabular-nums">
+							{#if t.bpm != null}
+								{formatNumber(t.bpm, 0)}
+							{:else}
+								<span class="text-[var(--color-fg-muted)]">—</span>
+							{/if}
+						</td>
+						<td
+							class={cn(
+								'px-3 py-2 text-right font-mono',
+								t.key_uncertain && 'text-[var(--color-fg-muted)] italic'
+							)}
+							title={t.key_uncertain ? 'Tonalité incertaine (vote 1/3 sans majorité)' : undefined}
+						>
+							{formatKey(t.key_note, t.key_mode)}
+						</td>
 						<td class="px-3 py-2 text-right font-mono text-[var(--color-fg-muted)]">
 							{formatDurationMs(t.duration_ms)}
 						</td>
@@ -547,6 +590,36 @@
 								<Badge variant="ok">OK</Badge>
 							{:else}
 								<Badge variant="muted">—</Badge>
+							{/if}
+						</td>
+						<td class="px-3 py-2 text-center">
+							{#if t.has_analysis}
+								<button
+									type="button"
+									onclick={() => openCorrection(t)}
+									class={cn(
+										'inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold transition-colors',
+										t.is_overridden
+											? 'border border-[var(--color-accent)] bg-[var(--color-accent)]/15 text-[var(--color-accent)] hover:bg-[var(--color-accent)]/25'
+											: t.confidence_low
+												? 'border border-[var(--color-warn)] text-[var(--color-warn)] hover:bg-[var(--color-warn)]/15'
+												: 'border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] hover:border-[var(--color-fg-muted)]'
+									)}
+									title={t.is_overridden
+										? 'Valeurs corrigées manuellement (clic pour rééditer)'
+										: t.confidence_low
+											? 'Analyse incertaine — clic pour corriger'
+											: 'Corriger BPM / Tonalité'}
+									aria-label="Corriger BPM / Tonalité"
+								>
+									{#if t.is_overridden}
+										✓
+									{:else if t.confidence_low}
+										⚠
+									{:else}
+										✎
+									{/if}
+								</button>
 							{/if}
 						</td>
 						<td class="px-3 py-2 text-right">
@@ -688,4 +761,11 @@
 	initialTargetId={actionPlanInitialTarget}
 	onClose={closeActionPlan}
 	onPlanSaved={reloadComparedTargets}
+/>
+
+<TrackCorrectionModal
+	track={correctionTrack}
+	isOpen={correctionOpen}
+	onClose={closeCorrection}
+	onSaved={onCorrectionSaved}
 />

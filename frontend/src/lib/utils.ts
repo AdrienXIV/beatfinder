@@ -2,9 +2,24 @@ export function cn(...classes: (string | undefined | false | null)[]): string {
 	return classes.filter(Boolean).join(' ');
 }
 
+/**
+ * Parse une string ISO 8601 en Date. Si l'ISO n'a pas de timezone marker
+ * (Z, +HH:MM ou -HH:MM), on assume **UTC** au lieu de l'heure locale.
+ *
+ * Workaround pour le bug récurrent backend : SQLite/SQLAlchemy stocke les
+ * `datetime.now(UTC)` comme strings naïves (sans tz). Pydantic les sérialise
+ * sans suffixe → `new Date()` les interprète comme heure locale et affiche
+ * 2h en retard en France (UTC+2 été). Tant que le backend ne forçera pas
+ * la tz à la sérialisation, ce helper compense côté frontend.
+ */
+function parseIsoAsUtc(iso: string): Date {
+	const hasTz = /[Zz]|[+-]\d{2}:?\d{2}$/.test(iso);
+	return new Date(hasTz ? iso : iso + 'Z');
+}
+
 export function formatDate(iso: string | null | undefined): string {
 	if (!iso) return '—';
-	const d = new Date(iso);
+	const d = parseIsoAsUtc(iso);
 	if (isNaN(d.getTime())) return '—';
 	return d.toLocaleDateString('fr-FR', {
 		year: 'numeric',
@@ -15,7 +30,7 @@ export function formatDate(iso: string | null | undefined): string {
 
 export function formatDateTime(iso: string | null | undefined): string {
 	if (!iso) return '—';
-	const d = new Date(iso);
+	const d = parseIsoAsUtc(iso);
 	if (isNaN(d.getTime())) return '—';
 	return d.toLocaleString('fr-FR', {
 		year: 'numeric',

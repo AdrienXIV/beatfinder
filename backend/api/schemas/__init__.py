@@ -23,8 +23,9 @@ from .core import (
     HealthOut,
     SpotifySettingsIn,
     SpotifySettingsOut,
+    UpdateCheckOut,
 )
-from .jobs import AnalyzeRequest, JobOut, JobProgressOut
+from .jobs import AnalyzeRequest, AnalyzeTrackRequest, JobOut, JobProgressOut
 from .playlists import (
     PatternOut,
     PatternSummaryOut,
@@ -42,11 +43,19 @@ from .reports import (
     MultiStatRowOut,
     SpectralRadarOut,
 )
+from .overrides import TrackOverrideIn, TrackOverrideOut
+from .sessions import (
+    CreateSessionIn,
+    CreativeSessionDetailOut,
+    CreativeSessionSummaryOut,
+    SessionVersionOut,
+)
 
 __all__ = [
     "ActionItemOut",
     "ActionPlanOut",
     "AnalyzeRequest",
+    "AnalyzeTrackRequest",
     "AppStatusOut",
     "BriefOut",
     "CacheCategoryOut",
@@ -56,6 +65,9 @@ __all__ = [
     "CompareRequest",
     "ComparedSourceOut",
     "ComparedTargetOut",
+    "CreateSessionIn",
+    "CreativeSessionDetailOut",
+    "CreativeSessionSummaryOut",
     "DBCountsOut",
     "HealthOut",
     "JobOut",
@@ -67,9 +79,13 @@ __all__ = [
     "PatternSummaryOut",
     "PlaylistDetailOut",
     "PlaylistSummaryOut",
+    "SessionVersionOut",
     "SpectralRadarOut",
     "SpotifySettingsIn",
     "SpotifySettingsOut",
+    "TrackOverrideIn",
+    "TrackOverrideOut",
+    "UpdateCheckOut",
     "StylePredictionItemOut",
     "StylePredictionOut",
     "ThresholdPresetOut",

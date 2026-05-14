@@ -13,22 +13,34 @@
 	let submitting = $state(false);
 	let error = $state<string | null>(null);
 
+	function isTrackUrl(u: string): boolean {
+		return /(?:spotify:track:|open\.spotify\.com\/track\/)/i.test(u.trim());
+	}
+
+	const urlIsTrack = $derived(isTrackUrl(url));
+
 	async function onSubmit(e: Event) {
 		e.preventDefault();
 		if (!url.trim()) return;
 		error = null;
 		submitting = true;
 		try {
-			const limitNum = limitStr.trim() === '' ? null : Number.parseInt(limitStr, 10);
-			if (limitNum !== null && (Number.isNaN(limitNum) || limitNum <= 0)) {
-				throw new Error('Limit doit être un entier positif ou vide.');
+			let job;
+			if (urlIsTrack) {
+				// Track isolée : pas de limit / save / download (auto-managé)
+				job = await api.analyzeTrack(url.trim());
+			} else {
+				const limitNum = limitStr.trim() === '' ? null : Number.parseInt(limitStr, 10);
+				if (limitNum !== null && (Number.isNaN(limitNum) || limitNum <= 0)) {
+					throw new Error('Limit doit être un entier positif ou vide.');
+				}
+				job = await api.analyze({
+					url: url.trim(),
+					save,
+					limit: limitNum,
+					download
+				});
 			}
-			const job = await api.analyze({
-				url: url.trim(),
-				save,
-				limit: limitNum,
-				download
-			});
 			await goto(`/jobs/${job.id}`);
 		} catch (e) {
 			submitting = false;
@@ -44,10 +56,11 @@
 </script>
 
 <div class="max-w-2xl mx-auto">
-	<h1 class="text-3xl font-bold tracking-tight mb-1">Analyser une playlist</h1>
+	<h1 class="text-3xl font-bold tracking-tight mb-1">Analyser Spotify</h1>
 	<p class="text-sm text-[var(--color-fg-muted)] mb-8">
-		Spotify URL, URI ou ID. Le pipeline télécharge l'audio via YouTube (si manquant)
-		puis extrait BPM, tonalité, énergie, profil spectral, structure.
+		Spotify URL, URI ou ID — <strong>playlist</strong> ou <strong>track isolée</strong>.
+		Le pipeline télécharge l'audio via YouTube (si manquant) puis extrait BPM,
+		tonalité, énergie, profil spectral, structure.
 	</p>
 
 	<Card>
@@ -60,15 +73,20 @@
 					id="url"
 					type="text"
 					bind:value={url}
-					placeholder="https://open.spotify.com/playlist/…"
+					placeholder="https://open.spotify.com/playlist/… ou /track/…"
 					required
 					class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 h-10 text-sm font-mono focus:outline focus:outline-2 focus:outline-[var(--color-accent)] focus:border-transparent"
 				/>
+				{#if urlIsTrack}
+					<p class="mt-2 text-xs text-[var(--color-accent)]">
+						<strong>Track isolée détectée.</strong> Téléchargement YouTube + analyse + persistance en DB (hors playlist). Les options ci-dessous ne s'appliquent pas.
+					</p>
+				{/if}
 			</div>
 
 			<div>
 				<label for="limit" class="block text-sm font-medium mb-1.5">
-					Limit (optionnel)
+					Limit (optionnel, playlist uniquement)
 				</label>
 				<input
 					id="limit"

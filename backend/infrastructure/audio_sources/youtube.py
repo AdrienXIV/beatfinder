@@ -1,11 +1,13 @@
 """YouTubeSource : recherche + téléchargement audio via yt-dlp (Python module).
 
 Stratégie de matching :
-  1. ytsearch5 sur "artist title".
+  1. ytsearch10 sur "artist title".
   2. Filtre les résultats avec mots-clés blacklist (live/cover/karaoke/sped up...).
   3. Si duration_ms est fourni, garde le résultat dont la durée est la plus proche
      dans la tolérance (±5s ou ±10%, le plus permissif des deux).
-  4. Sinon retourne le premier candidat non-blacklisté.
+  4. Si aucun candidat acceptable, retry avec `title` seul (sans artiste) — utile
+     quand YouTube indexe l'upload sous "Title - Artist" au lieu de "Artist - Title".
+  5. Sinon retourne le premier candidat non-blacklisté.
 
 Cache : data/audio/{spotify_id}.mp3 (skip si déjà présent).
 Dépendance système : ffmpeg (requis pour FFmpegExtractAudio postprocessor).
@@ -32,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 BLACKLIST_KEYWORDS = re.compile(
     r"\b(live|cover|karaok[ée]|instrumental|sped\s*up|slowed|reaction|"
-    r"tutorial|lyrics?\s+only|8d|nightcore|reverb|mashup)\b",
+    r"tutorial|8d|nightcore|reverb|mashup)\b",
     re.IGNORECASE,
 )
 DURATION_TOLERANCE_MS = 5_000
@@ -116,7 +118,7 @@ class YouTubeSource:
         self,
         cache_dir: Path,
         *,
-        search_results: int = 5,
+        search_results: int = 10,
         audio_quality: str = "320",
         cookies_file: str | os.PathLike[str] | None = None,
     ) -> None:
@@ -138,26 +140,56 @@ class YouTubeSource:
             logger.debug("Cache hit %s", target.name)
             return target
 
-        query = f"{artist} {title}".strip()
-        if not query:
+        primary_query = f"{artist} {title}".strip()
+        if not primary_query:
             raise TrackNotFoundError(f"Query vide pour spotify_id={spotify_id}")
 
-        try:
-            entries = self._search(query)
-        except (DownloadError, ExtractorError) as exc:
-            raise self._classify_error(exc) from exc
+        # 1er essai : "artist title". Si aucun candidat acceptable, retry avec
+        # le titre seul (sans artiste) pour rattraper les uploads indexés
+        # différemment (ex: "Title - Artist", "Title prod by X", etc.).
+        queries = [primary_query]
+        if title.strip() and title.strip() != primary_query:
+            queries.append(title.strip())
 
-        if not entries:
-            raise TrackNotFoundError(f"Aucun résultat YouTube pour : {query}")
+        candidate: dict | None = None
+        last_stats: dict[str, int] = {}
+        tried: list[str] = []
+        for q in queries:
+            tried.append(q)
+            try:
+                entries = self._search(q)
+            except (DownloadError, ExtractorError) as exc:
+                raise self._classify_error(exc) from exc
+            if not entries:
+                last_stats = {"n_total": 0, "n_blacklist": 0, "n_out_of_duration": 0}
+                continue
+            candidate, last_stats = self._pick_candidate(
+                entries, duration_ms=duration_ms, artist=artist,
+            )
+            if candidate is not None:
+                break
+            logger.info(
+                "Retry recherche avec query simplifiée : query=%r n_total=%d "
+                "rejets={blacklist:%d, hors-durée:%d}",
+                q, last_stats.get("n_total", 0),
+                last_stats.get("n_blacklist", 0),
+                last_stats.get("n_out_of_duration", 0),
+            )
 
-        candidate = self._pick_candidate(
-            entries, duration_ms=duration_ms, artist=artist,
-        )
         if candidate is None:
+            n_total = last_stats.get("n_total", 0)
+            if n_total == 0:
+                raise TrackNotFoundError(
+                    f"Aucun résultat YouTube pour : {primary_query} "
+                    f"(queries essayées : {tried})"
+                )
             raise TrackNotFoundError(
-                f"Aucun match acceptable pour {query} "
+                f"Aucun match acceptable pour {primary_query} "
                 f"(durée Spotify={duration_ms}ms, "
-                f"{len(entries)} résultats inspectés)."
+                f"{n_total} résultats inspectés sur la dernière query : "
+                f"{last_stats.get('n_blacklist', 0)} blacklistés, "
+                f"{last_stats.get('n_out_of_duration', 0)} hors-durée ; "
+                f"queries essayées : {tried})."
             )
 
         video_url = candidate.get("url") or candidate.get("webpage_url")
@@ -223,8 +255,8 @@ class YouTubeSource:
         *,
         duration_ms: int | None,
         artist: str = "",
-    ) -> dict | None:
-        """Choisit le meilleur candidat avec priorité de source.
+    ) -> tuple[dict | None, dict[str, int]]:
+        """Choisit le meilleur candidat + retourne un dict de stats de rejet.
 
         Tiers (du meilleur au pire) :
           0 — Chaîne "X - Topic" : upload auto-généré par YouTube depuis le master
@@ -235,15 +267,23 @@ class YouTubeSource:
           3 — Reste (lyrics videos, fan uploads, instru/karaoke échappés au blacklist).
 
         À tier égal, on prend le plus proche en durée.
+
+        Le 2e élément du tuple : `{"n_total", "n_blacklist", "n_out_of_duration"}`.
+        Utilisé pour produire un message d'erreur informatif quand rien ne passe.
         """
         artist_primary = artist.split(",")[0].strip().lower() if artist else ""
         viable: list[tuple[tuple[int, float], dict]] = []
+        n_blacklist = 0
+        n_out_of_duration = 0
+        n_total = 0
         for entry in entries:
             if not entry:
                 continue
+            n_total += 1
             entry_title = entry.get("title", "") or ""
             if BLACKLIST_KEYWORDS.search(entry_title):
                 logger.debug("Skip (blacklist) : %s", entry_title)
+                n_blacklist += 1
                 continue
             entry_duration = entry.get("duration")
             if duration_ms is not None and entry_duration is not None:
@@ -258,6 +298,7 @@ class YouTubeSource:
                         "Skip (durée %.1fs vs %.1fs cible, tol=%.1fs) : %s",
                         float(entry_duration), target_s, tol, entry_title,
                     )
+                    n_out_of_duration += 1
                     continue
             else:
                 delta = float("inf")
@@ -271,8 +312,13 @@ class YouTubeSource:
             else:
                 tier = 3
             viable.append(((tier, delta), entry))
+        stats = {
+            "n_total": n_total,
+            "n_blacklist": n_blacklist,
+            "n_out_of_duration": n_out_of_duration,
+        }
         if not viable:
-            return None
+            return None, stats
         viable.sort(key=lambda x: x[0])
         best = viable[0][1]
         best_tier = viable[0][0][0]
@@ -282,7 +328,7 @@ class YouTubeSource:
             best.get("channel") or best.get("uploader"),
             best.get("title", "")[:60],
         )
-        return best
+        return best, stats
 
     @staticmethod
     def _classify_error(exc: Exception) -> AudioSourceError:

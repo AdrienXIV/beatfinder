@@ -63,13 +63,11 @@ def _local_audio_files(data_dir: Path) -> list[Path]:
 
 
 def _report_files(data_dir: Path) -> list[Path]:
-    """Briefs markdown + CSV : data/reports/*.md et data/reports/*.csv."""
+    """Briefs markdown : data/reports/*.md."""
     root = data_dir / "reports"
     if not root.is_dir():
         return []
-    files = [p for p in root.glob("*.md") if p.is_file()]
-    files.extend(p for p in root.glob("*.csv") if p.is_file())
-    return files
+    return [p for p in root.glob("*.md") if p.is_file()]
 
 
 def _action_plan_files(data_dir: Path) -> list[Path]:
@@ -124,8 +122,8 @@ def get_cache_stats(data_dir: Path, session: Session) -> dict[str, Any]:
         },
         "reports": {
             "kind": "reports",
-            "label": "Briefs + CSV",
-            "description": "data/reports/*.md, *.csv",
+            "label": "Briefs",
+            "description": "data/reports/*.md",
             "n_files": len(reports),
             "size_bytes": _total_size(reports),
             "flushable": True,

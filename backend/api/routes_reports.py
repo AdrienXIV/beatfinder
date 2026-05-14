@@ -1,14 +1,16 @@
 """Routes FastAPI reports (sprint 3b).
 
   GET  /playlists/{spotify_id}/brief         : markdown rendu, cache .md auto
-  GET  /playlists/{spotify_id}/brief.csv     : export CSV per-track
+  GET  /playlists/{spotify_id}/brief.md      : export markdown brut (téléchargement)
   GET  /playlists/{spotify_id}/brief.pdf     : PDF via Chromium headless (fidélité 100%)
   POST /compare                              : diff markdown entre 2 playlists
   GET  /compare/multi?ids=A,B,C              : radar + stats pour 2 à 5 sources
   GET  /tracks/{spotify_id}/analysis         : features brut + meta d'une track
+  POST /tracks/analyze                       : crée un job pour analyser une track isolée
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Literal
@@ -18,13 +20,19 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.api.deps import get_data_dir, get_session
+from backend.api.deps import get_data_dir, get_job_queue, get_session
+from backend.api.job_runner import run_track_analyze_job
+from backend.api.jobs import JobQueue
 from backend.api.schemas import (
+    AnalyzeTrackRequest,
     BriefOut,
     CompareOut,
     CompareRequest,
+    JobOut,
     MultiCompareOut,
     TrackAnalysisOut,
+    TrackOverrideIn,
+    TrackOverrideOut,
 )
 from backend.cli.compare import _load_snapshot, build_diff_markdown
 from backend.db import init_db, make_session_factory
@@ -34,12 +42,18 @@ from backend.domain.models import (
     PlaylistTrack,
     Track,
     TrackAnalysis,
+    TrackOverride,
 )
+from backend.infrastructure.settings_store import load_settings
 from backend.local_projects import brief_filename
-from backend.report_generator import generate_brief, generate_csv
+from backend.report_generator import generate_brief
 from backend.report_generator.pdf import generate_pdf_from_url
 from backend.services.multi_compare import build_multi_compare
 from backend.services.source_loader import load_pattern_source
+from backend.services.track_overrides import (
+    propagate_override_to_active_sessions,
+    regenerate_playlist_patterns_for_track,
+)
 
 StyleKey = Literal["editorial", "soft", "newspaper", "blueprint"]
 _VALID_STYLES: frozenset[str] = frozenset(("editorial", "soft", "newspaper", "blueprint"))
@@ -48,6 +62,7 @@ router = APIRouter(tags=["reports"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
 DataDirDep = Annotated[Path, Depends(get_data_dir)]
+QueueDep = Annotated[JobQueue, Depends(get_job_queue)]
 
 
 @router.get("/playlists/{spotify_id}/brief", response_model=BriefOut)
@@ -136,14 +151,19 @@ def get_brief(
     )
 
 
-@router.get("/playlists/{spotify_id}/brief.csv")
-def get_brief_csv(
+@router.get("/playlists/{spotify_id}/brief.md")
+def get_brief_md(
     spotify_id: str,
     session: SessionDep,
     data_dir: DataDirDep,
     regenerate: bool = False,
 ) -> Response:
-    """Export CSV per-track. Cache fichier puis fallback régénération."""
+    """Export markdown brut (téléchargement). Cache fichier puis fallback régénération.
+
+    Réutilise la même logique que `get_brief()` mais retourne en download
+    `text/markdown` avec Content-Disposition attachment. Utile pour archiver
+    le brief sur disque ou le donner à un LLM externe.
+    """
     p = session.scalar(
         select(Playlist).where(Playlist.spotify_id == spotify_id),
     )
@@ -152,10 +172,23 @@ def get_brief_csv(
             status_code=404, detail=f"Playlist {spotify_id!r} not found",
         )
 
-    csv_path = data_dir / "reports" / f"{brief_filename(spotify_id)}.csv"
-    if csv_path.exists() and not regenerate:
-        content = csv_path.read_text(encoding="utf-8")
+    report_path = data_dir / "reports" / f"{brief_filename(spotify_id)}.md"
+    if report_path.exists() and not regenerate:
+        content = report_path.read_text(encoding="utf-8")
     else:
+        pat = session.scalar(
+            select(PlaylistPattern)
+            .where(PlaylistPattern.playlist_id == p.id)
+            .order_by(PlaylistPattern.id.desc()),
+        )
+        if pat is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"No pattern for playlist {spotify_id!r}. "
+                    "Run an analyze first."
+                ),
+            )
         pt_rows = session.scalars(
             select(PlaylistTrack)
             .where(PlaylistTrack.playlist_id == p.id)
@@ -175,22 +208,18 @@ def get_brief_csv(
                 "title": pt.track.title,
                 "features": latest.features_json,
             })
-        if not tracks_data:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"No track analyses for playlist {spotify_id!r}. "
-                    "Run an analyze first."
-                ),
-            )
-        content = generate_csv(tracks_data)
-        csv_path.parent.mkdir(parents=True, exist_ok=True)
-        csv_path.write_text(content, encoding="utf-8")
+        content = generate_brief(
+            pat.pattern_json,
+            playlist_name=p.name,
+            tracks_data=tracks_data,
+        )
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(content, encoding="utf-8")
 
-    filename = f"{spotify_id}-brief.csv"
+    filename = f"{spotify_id}-brief.md"
     return Response(
         content=content,
-        media_type="text/csv; charset=utf-8",
+        media_type="text/markdown; charset=utf-8",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
         },
@@ -347,3 +376,112 @@ def get_track_analysis(
         features=latest.features_json,
         analyzed_at=latest.created_at,
     )
+
+
+@router.patch(
+    "/tracks/{spotify_id}/overrides", response_model=TrackOverrideOut,
+)
+def upsert_track_override(
+    spotify_id: str,
+    payload: TrackOverrideIn,
+    session: SessionDep,
+    data_dir: DataDirDep,
+) -> TrackOverrideOut:
+    """Crée ou met à jour la correction manuelle d'une track (BPM/key/mode).
+
+    Partial update : seuls les champs fournis (non-null) sont écrits.
+    Pour reset un champ spécifique, utilise DELETE.
+
+    Régénère automatiquement le pattern de toutes les playlists contenant
+    cette track + invalide les briefs en cache.
+    """
+    track = session.scalar(
+        select(Track).where(Track.spotify_id == spotify_id),
+    )
+    if track is None:
+        raise HTTPException(
+            status_code=404, detail=f"Track {spotify_id!r} introuvable",
+        )
+
+    override = session.scalar(
+        select(TrackOverride).where(TrackOverride.track_id == track.id),
+    )
+    if override is None:
+        override = TrackOverride(track_id=track.id)
+        session.add(override)
+
+    if payload.bpm is not None:
+        override.bpm = float(payload.bpm)
+    if payload.key_note is not None:
+        override.key_note = payload.key_note
+    if payload.key_mode is not None:
+        override.key_mode = payload.key_mode
+
+    session.commit()
+    session.refresh(override)
+    regenerate_playlist_patterns_for_track(session, track.id, data_dir)
+    propagate_override_to_active_sessions(session, track, data_dir)
+    session.commit()
+    return TrackOverrideOut(
+        bpm=override.bpm,
+        key_note=override.key_note,
+        key_mode=override.key_mode,
+    )
+
+
+@router.delete("/tracks/{spotify_id}/overrides", status_code=204)
+def delete_track_override(
+    spotify_id: str,
+    session: SessionDep,
+    data_dir: DataDirDep,
+) -> None:
+    """Supprime entièrement l'override d'une track (reset to algos).
+
+    Régénère le pattern des playlists impactées + invalide les briefs cachés.
+    """
+    track = session.scalar(
+        select(Track).where(Track.spotify_id == spotify_id),
+    )
+    if track is None:
+        raise HTTPException(
+            status_code=404, detail=f"Track {spotify_id!r} introuvable",
+        )
+    override = session.scalar(
+        select(TrackOverride).where(TrackOverride.track_id == track.id),
+    )
+    if override is not None:
+        session.delete(override)
+        session.commit()
+        regenerate_playlist_patterns_for_track(session, track.id, data_dir)
+        propagate_override_to_active_sessions(session, track, data_dir)
+        session.commit()
+
+
+@router.post("/tracks/analyze", response_model=JobOut, status_code=202)
+async def trigger_track_analyze(
+    payload: AnalyzeTrackRequest, queue: QueueDep,
+) -> JobOut:
+    """Crée un job pour analyser une track Spotify isolée (hors playlist).
+
+    La track est téléchargée via YouTube puis analysée, et persistée en DB
+    comme `Track` + `TrackAnalysis` — sans entrée `PlaylistTrack` (donc pas
+    rattachée à une playlist). Utile comme cible de session guidée ou de
+    plan d'action.
+    """
+    settings = load_settings()
+    if not settings.spotify.is_configured:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Spotify n'est pas configuré. Va dans Paramètres et saisis "
+                "ton CLIENT_ID + CLIENT_SECRET (developer.spotify.com)."
+            ),
+        )
+
+    job = queue.create("track-analyze")
+    task = asyncio.create_task(
+        run_track_analyze_job(queue, job.id, payload),
+        name=f"track-analyze:{job.id}",
+    )
+    queue.attach_task(job.id, task)
+    return JobOut(**job.to_dict())

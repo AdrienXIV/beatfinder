@@ -32,6 +32,17 @@ class TrackOut(BaseModel):
     position: int = 0
     has_analysis: bool = False
     audio_path: str | None = None
+    # Features synthétiques pour l'affichage tabulaire — extraites de la dernière
+    # analyse si présente. None si has_analysis=False.
+    bpm: float | None = None
+    key_note: str | None = None      # ex: "A", "C#"
+    key_mode: str | None = None      # "major" / "minor"
+    key_uncertain: bool | None = None  # True si vote 1/3 sans majorité
+    # Override / fiabilité de l'analyse (pour UI ⚠ + bouton "Corriger").
+    is_overridden: bool = False     # True si BPM/key viennent d'une correction manuelle
+    confidence_low: bool = False    # True si au moins 1 raison de doute (cf. confidence_reasons)
+    confidence_reasons: list[str] = []  # raisons textuelles à afficher en tooltip
+    bpm_alt_hypotheses: list[float] = []  # alternatives plausibles (×2, /2, ×1.5, /1.5)
 
 
 class PatternSummaryOut(BaseModel):

@@ -12,6 +12,18 @@ class HealthOut(BaseModel):
 
 class AppStatusOut(BaseModel):
     spotify_configured: bool
+    version: str
+
+
+class UpdateCheckOut(BaseModel):
+    """Statut d'une vérification de mise à jour vs GitHub Releases."""
+
+    current: str
+    latest: str | None = None
+    update_available: bool = False
+    release_url: str | None = None
+    release_notes: str | None = None
+    published_at: str | None = None
 
 
 class DBCountsOut(BaseModel):

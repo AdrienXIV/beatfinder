@@ -19,7 +19,7 @@ def _eq_actions(bands: dict) -> dict[str, str]:
     high = bands["high"]["median"]
     return {
         "sub": (
-            "808 long et tonal, vise fondamental ~50 Hz" if sub > 0.30
+            "sub-bass long et tonal, vise fondamental ~50 Hz" if sub > 0.30
             else "sub présent mais discret" if sub > 0.15
             else "sub léger, kick acoustique probable"
         ),
@@ -33,14 +33,14 @@ def _eq_actions(bands: dict) -> dict[str, str]:
             else "creux 250–500 Hz typique, laisse cette zone fine"
         ),
         "mid": (
-            "voix très exposée, mix le rap sec et fort" if mid > 0.20
+            "voix très exposée, mix sec et frontal" if mid > 0.20
             else "voix dans la moyenne, headroom mid OK" if mid > 0.10
             else "voix discrète, ambient/instrumental dominant"
         ),
         "high_mid": (
             "présence/sibilance forte → de-esser obligatoire" if high_mid > 0.10
-            else "boost +2 dB à 4 kHz si voix manque de bite" if high_mid > 0.03
-            else "high-mid étouffé, signature trap (rolloff agressif)"
+            else "boost +2 dB à 4 kHz si voix manque de mordant" if high_mid > 0.03
+            else "high-mid étouffé (rolloff agressif)"
         ),
         "high": (
             "hats/cymbales brillants, air généreux" if high > 0.05
@@ -95,7 +95,7 @@ def _to_copy(pattern: dict) -> list[str]:
     sub_pct = spectral["band_energy"]["sub"]["median"] * 100
     bass_pct = spectral["band_energy"]["bass"]["median"] * 100
     bullets.append(
-        f"Sub-bass massif : **{sub_pct:.0f}%** de l'énergie sous 60 Hz (808 long et tonal)"
+        f"Sub-bass massif : **{sub_pct:.0f}%** de l'énergie sous 60 Hz (basses longues et tonales)"
     )
     bullets.append(
         f"Bass dominante : **{bass_pct:.0f}%** entre 60-250 Hz (kick + sub vrombissant)"

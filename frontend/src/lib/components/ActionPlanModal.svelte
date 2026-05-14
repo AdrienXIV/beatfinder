@@ -21,6 +21,9 @@
 		SPECTRAL_BAND_LABELS
 	} from '$lib/components/charts/spectral-colors';
 	import PriorityDonut from '$lib/components/charts/PriorityDonut.svelte';
+	import BriefHelpModal from '$lib/components/BriefHelpModal.svelte';
+	import ScrollLock from '$lib/components/ScrollLock.svelte';
+	import { ACTION_HELP } from '$lib/action-help';
 	import { cn, formatDateTime } from '$lib/utils';
 
 	type View = 'select' | 'loading' | 'result';
@@ -324,7 +327,90 @@
 	function smallSample(n: number): boolean {
 		return n > 0 && n < 8;
 	}
+
+	/**
+	 * Sépare une chaîne par les virgules de premier niveau (ignore celles
+	 * dans des parenthèses ou crochets). Ex : "EQ cut sur (drums, FX), shelve down"
+	 * → ["EQ cut sur (drums, FX)", "shelve down"].
+	 */
+	function splitTopLevel(text: string): string[] {
+		const parts: string[] = [];
+		let depth = 0;
+		let start = 0;
+		for (let i = 0; i < text.length; i++) {
+			const c = text[i];
+			if (c === '(' || c === '[') depth++;
+			else if (c === ')' || c === ']') depth = Math.max(0, depth - 1);
+			else if (depth === 0 && c === ',') {
+				parts.push(text.substring(start, i).trim());
+				start = i + 1;
+			}
+		}
+		parts.push(text.substring(start).trim());
+		return parts.filter(Boolean);
+	}
+
+	/**
+	 * Parse une chaîne d'action de la forme "Headline : step1, step2, step3"
+	 * vers `{ headline, items[] }`. Si pas de " : ", `headline` est null et
+	 * tout est splitté en items. Si pas de virgules de premier niveau, items
+	 * contient 1 élément (rendu en paragraphe simple).
+	 */
+	function parseActionText(action: string): { headline: string | null; items: string[] } {
+		const sep = ' : ';
+		const idx = action.indexOf(sep);
+		if (idx === -1) {
+			return { headline: null, items: splitTopLevel(action) };
+		}
+		return {
+			headline: action.slice(0, idx).trim(),
+			items: splitTopLevel(action.slice(idx + sep.length))
+		};
+	}
+
+	// Modal d'aide imbriquée (réutilise BriefHelpModal en générique).
+	// Le contenu vient de action-help.ts indexé par une key déclarative.
+	let helpOpen = $state(false);
+	let helpTitle = $state('');
+	let helpBody = $state('');
+
+	function openHelp(key: string) {
+		const entry = ACTION_HELP[key];
+		if (!entry) return;
+		helpTitle = entry.title;
+		helpBody = entry.body;
+		helpOpen = true;
+	}
+
+	function closeHelp() {
+		helpOpen = false;
+	}
+
+	// Map catégorie d'action → clé d'aide dans ACTION_HELP.
+	const categoryHelpKey: Record<ActionCategory, string> = {
+		mastering: 'mastering',
+		mix: 'mix',
+		rhythm: 'rhythm',
+		tonality: 'tonality',
+		structure: 'structure'
+	};
+
+	// Intros vulgarisées affichées sous chaque h3 de catégorie.
+	// Pour les explications longues + définitions, voir ACTION_HELP via le « ? ».
+	const categoryIntro: Record<ActionCategory, string> = {
+		mastering:
+			"Le traitement du bus master : LUFS, true peak, compression, dynamic range. Ce qui rend ta track compétitive en streaming.",
+		mix: "L'équilibre fréquentiel entre les 6 bandes du spectre. Détermine si ta track sonne sombre, brillante, lourde ou aérée.",
+		rhythm:
+			"Tempo et densité rythmique. Le BPM est la première décision à matcher avec la cible.",
+		tonality:
+			"La clé musicale (note racine + mineur/majeur). Détermine l'ambiance harmonique.",
+		structure:
+			"Architecture temporelle : position du drop, nombre de sections, durée moyenne."
+	};
 </script>
+
+<ScrollLock open={isOpen} />
 
 <dialog
 	bind:this={dialogEl}
@@ -619,27 +705,42 @@
 							{/if}
 						</div>
 					</div>
-					<div class="mt-2 flex gap-2 text-xs">
+					<div class="mt-2 flex flex-wrap gap-x-2 gap-y-2 text-xs">
 						<Badge variant="err">{stats.high} high</Badge>
 						<Badge variant="warn">{stats.medium} medium</Badge>
 						<Badge variant="muted">{stats.low} low</Badge>
 					</div>
 				</div>
 
-				<p class="mb-5 text-xs text-[var(--color-fg-muted)] italic">
-					Coche une action quand tu l'as appliquée à ton projet pour suivre ton avancement.
-					L'état est mémorisé par paire (projet → cible).
-				</p>
+				<div class="mb-5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)]/30 p-3">
+					<p class="text-sm text-[var(--color-fg)] leading-relaxed">
+						<strong>Ton plan d'action personnalisé.</strong> Beatfinder a comparé ta
+						source à la cible et a sorti une checklist d'ajustements concrets à
+						appliquer dans ta DAW : mastering, mix, rythme, tonalité, structure.
+					</p>
+					<p class="mt-2 text-xs text-[var(--color-fg-muted)] leading-relaxed">
+						Coche une action quand tu l'as appliquée pour suivre ton avancement. L'état
+						est mémorisé localement par paire (source → cible). Clique sur le « ? » à
+						côté d'un titre pour une explication détaillée.
+					</p>
+				</div>
 
 				{#if plan.from_bands && Object.keys(plan.from_bands).length > 0}
 					<div class="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
 						<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)]/30 p-3">
-							<h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-3">
-								Profil spectral
-								<span class="font-normal normal-case tracking-normal text-[var(--color-fg-muted)]">
-									— anneaux ordonnés du plus grave au plus aigu, extérieur → intérieur
-								</span>
+							<h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1 flex items-center gap-2">
+								<span>Profil spectral</span>
+								<button
+									type="button"
+									onclick={() => openHelp('spectral-rings')}
+									class="inline-flex items-center justify-center w-[20px] h-[20px] shrink-0 rounded-full border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] text-[11px] font-semibold normal-case leading-none transition-colors"
+									aria-label="Aide détaillée — Profil spectral"
+								>?</button>
 							</h4>
+							<p class="text-[11px] text-[var(--color-fg-muted)] italic mb-3 leading-snug">
+								Compare visuellement où ton énergie sonore se concentre vs. la cible.
+								Plus deux anneaux ont des formes proches, plus tes mixs collent.
+							</p>
 							<div class="grid grid-cols-2 gap-3">
 								<div class="flex flex-col items-center gap-2">
 									<div class="text-xs text-center text-[var(--color-fg-muted)] truncate w-full" title={currentName}>
@@ -685,13 +786,25 @@
 							</ol>
 						</div>
 						<div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)]/30 p-3">
-							<h4 class="flex items-baseline justify-between gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-2">
-								<span>Avancement par priorité</span>
+							<h4 class="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">
+								<span class="flex items-center gap-2">
+									<span>Avancement par priorité</span>
+									<button
+										type="button"
+										onclick={() => openHelp('priority-donut')}
+										class="inline-flex items-center justify-center w-[20px] h-[20px] shrink-0 rounded-full border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] text-[11px] font-semibold normal-case leading-none transition-colors"
+										aria-label="Aide détaillée — Avancement par priorité"
+									>?</button>
+								</span>
 								<span class="font-mono normal-case tracking-normal text-[var(--color-fg)]">
 									{stats.done}/{stats.total} faits
 									<span class="text-[var(--color-fg-muted)]">({stats.donePct}%)</span>
 								</span>
 							</h4>
+							<p class="text-[11px] text-[var(--color-fg-muted)] italic mb-2 leading-snug">
+								Suis tes progrès. Commence par les actions <strong>High</strong>
+								(impact maximal), descends ensuite vers Medium puis Low.
+							</p>
 							<PriorityDonut
 								high={stats.high}
 								medium={stats.medium}
@@ -710,15 +823,25 @@
 
 				{#each grouped as g (g.category)}
 					<div class="mb-5">
-						<h3 class="text-sm font-semibold mb-2 flex items-center gap-2">
+						<h3 class="text-sm font-semibold mb-1 flex items-center gap-2">
 							<span>{g.label}</span>
 							<span class="text-xs font-normal text-[var(--color-fg-muted)]">
 								{g.items.length}
 							</span>
+							<button
+								type="button"
+								onclick={() => openHelp(categoryHelpKey[g.category])}
+								class="inline-flex items-center justify-center w-[20px] h-[20px] shrink-0 rounded-full border border-[var(--color-border)] text-[var(--color-fg-muted)] hover:text-[var(--color-accent)] hover:border-[var(--color-accent)] text-[11px] font-semibold leading-none transition-colors"
+								aria-label="Aide détaillée — {g.label}"
+							>?</button>
 						</h3>
+						<p class="text-[11px] text-[var(--color-fg-muted)] italic mb-3 leading-snug max-w-prose">
+							{categoryIntro[g.category]}
+						</p>
 						<div class="space-y-2">
 							{#each g.items as item (item.key)}
 								{@const isChecked = !!checked[item.key]}
+								{@const parsed = parseActionText(item.action)}
 								<label
 									class={cn(
 										'flex gap-3 rounded-lg border p-3 cursor-pointer transition-colors',
@@ -734,7 +857,7 @@
 										onchange={() => toggleCheck(item.key)}
 									/>
 									<div class="flex-1 min-w-0">
-										<div class="flex flex-wrap items-center gap-2 mb-1">
+										<div class="flex flex-wrap items-center gap-x-2 gap-y-2 mb-1">
 											<Badge variant={priorityBadge[item.priority]}>
 												{priorityLabel[item.priority]}
 											</Badge>
@@ -752,19 +875,60 @@
 												</span>
 											{/if}
 										</div>
-										<p
-											class={cn(
-												'text-sm leading-snug',
-												isChecked
-													? 'text-[var(--color-fg-muted)]'
-													: 'text-[var(--color-fg)]'
-											)}
-										>
-											{item.action}
-										</p>
-										<p class="text-xs text-[var(--color-fg-muted)] mt-1 italic">
-											{item.rationale}
-										</p>
+										{#if parsed.items.length > 1}
+											{#if parsed.headline}
+												<p
+													class={cn(
+														'text-sm leading-snug font-semibold',
+														isChecked
+															? 'text-[var(--color-fg-muted)]'
+															: 'text-[var(--color-fg)]'
+													)}
+												>
+													{parsed.headline}
+												</p>
+											{/if}
+											<p class="mt-0.5 text-xs italic text-[var(--color-fg-muted)] leading-snug">
+												{item.rationale}
+											</p>
+											<ul
+												class={cn(
+													'mt-3 ml-1 space-y-1 text-sm leading-snug list-none',
+													isChecked
+														? 'text-[var(--color-fg-muted)]'
+														: 'text-[var(--color-fg)]'
+												)}
+											>
+												{#each parsed.items as step (step)}
+													<li class="flex items-baseline gap-2">
+														<span
+															class={cn(
+																'shrink-0 font-mono',
+																isChecked
+																	? 'text-[var(--color-fg-muted)]'
+																	: 'text-[var(--color-accent)]'
+															)}
+															aria-hidden="true">→</span
+														>
+														<span>{step}</span>
+													</li>
+												{/each}
+											</ul>
+										{:else}
+											<p
+												class={cn(
+													'text-sm leading-snug',
+													isChecked
+														? 'text-[var(--color-fg-muted)]'
+														: 'text-[var(--color-fg)]'
+												)}
+											>
+												{item.action}
+											</p>
+											<p class="mt-1 text-xs italic text-[var(--color-fg-muted)] leading-snug">
+												{item.rationale}
+											</p>
+										{/if}
 									</div>
 								</label>
 							{/each}
@@ -801,14 +965,6 @@
 						>
 							Export .md
 						</a>
-						<a
-							href={api.masterChainAdgUrl(plan.from_id, plan.to_id)}
-							download
-							class="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] underline underline-offset-2"
-							title="Rack Ableton (expérimental, à remplir manuellement)"
-						>
-							Export .adg
-						</a>
 						<span class="text-[var(--color-border)] text-xs">·</span>
 					{/if}
 					<Button variant="outline" size="sm" onclick={resetPlan} disabled={busy} loading={busy}>
@@ -823,3 +979,5 @@
 		</div>
 	</div>
 </dialog>
+
+<BriefHelpModal isOpen={helpOpen} title={helpTitle} body={helpBody} onClose={closeHelp} />

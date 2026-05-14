@@ -32,6 +32,7 @@ from backend.api import (
     routes_playlists,
     routes_projects,
     routes_reports,
+    routes_sessions,
     routes_settings,
 )
 from backend.api.jobs import JobQueue
@@ -113,6 +114,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_jobs.router, prefix="/api")
     app.include_router(routes_projects.router, prefix="/api")
     app.include_router(routes_actions.router, prefix="/api")
+    app.include_router(routes_sessions.router, prefix="/api")
     app.include_router(routes_settings.router, prefix="/api")
 
     @app.get("/health", response_model=HealthOut, tags=["meta"])
@@ -385,6 +387,67 @@ def _open_browser_when_ready(host: str, port: int) -> None:
     threading.Thread(target=worker, daemon=True).start()
 
 
+def _is_port_in_use(host: str, port: int) -> bool:
+    """Test si un service tourne déjà sur (host, port). Évite de relancer
+    une instance Beatfinder quand l'utilisateur clique sur l'icône dock
+    macOS (qui re-exécute le binaire .app)."""
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.3)
+        try:
+            sock.connect((host, port))
+            return True
+        except (OSError, TimeoutError):
+            return False
+
+
+def _focus_existing_window(host: str, port: int) -> None:
+    """Focus la fenêtre Beatfinder existante (cas reopen via dock macOS).
+
+    Sur macOS, clic sur l'icône dock d'une app déjà lancée re-exécute le
+    binaire. Sans handler, Chrome `--app=URL` refuserait d'ouvrir une
+    seconde instance même URL/profile et tomberait sur Google. On évite ça
+    en activant + amenant au premier plan la fenêtre Chrome existante via
+    AppleScript.
+
+    Sur Linux/Windows : pas d'équivalent simple — on log et on exit.
+    """
+    import subprocess
+    import sys
+
+    if sys.platform != "darwin":
+        log.info("Already running on %s:%d, exiting", host, port)
+        return
+
+    url_prefix = f"http://{host}:{port}"
+    script = f"""
+    tell application "Google Chrome"
+        activate
+        set windowList to every window
+        repeat with w in windowList
+            set tabList to every tab of w
+            repeat with t in tabList
+                if URL of t starts with "{url_prefix}" then
+                    set index of w to 1
+                    return
+                end if
+            end repeat
+        end repeat
+    end tell
+    """
+    try:
+        subprocess.run(
+            ["osascript", "-e", script],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=3,
+        )
+        log.info("Focused existing Beatfinder window via AppleScript")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("Could not focus existing window: %s", exc)
+
+
 def main() -> None:
     """Standalone launcher pour packaging desktop."""
     import uvicorn
@@ -392,6 +455,18 @@ def main() -> None:
     load_dotenv()
     get_settings.cache_clear()
     settings = get_settings()
+
+    # Single-instance guard : si une instance Beatfinder tourne déjà sur
+    # ce port (cas typique macOS : clic dock icon re-exécute le binaire),
+    # on focus la fenêtre existante et on exit. Évite "Chrome ouvre Google
+    # parce que --app=URL est refusé pour duplicate user-data-dir".
+    if _is_port_in_use(settings.beatfinder_host, settings.beatfinder_port):
+        log.info(
+            "Beatfinder instance already running on %s:%d — focusing existing window",
+            settings.beatfinder_host, settings.beatfinder_port,
+        )
+        _focus_existing_window(settings.beatfinder_host, settings.beatfinder_port)
+        return
 
     if FRONTEND_BUILD.is_dir() and not settings.beatfinder_no_auto_open:
         _open_browser_when_ready(settings.beatfinder_host, settings.beatfinder_port)

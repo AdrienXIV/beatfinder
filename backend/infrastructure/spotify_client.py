@@ -48,6 +48,9 @@ class PlaylistAccessError(RuntimeError):
 PLAYLIST_ID_RE: Final[re.Pattern[str]] = re.compile(
     r"(?:spotify:playlist:|open\.spotify\.com/playlist/)([A-Za-z0-9]{22})"
 )
+TRACK_ID_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?:spotify:track:|open\.spotify\.com/track/)([A-Za-z0-9]{22})"
+)
 
 DEFAULT_SCOPE: Final[str] = "playlist-read-private playlist-read-collaborative"
 DEFAULT_REDIRECT_URI: Final[str] = "http://127.0.0.1:8888/callback"
@@ -143,6 +146,33 @@ class SpotifyClient:
         if not m:
             raise ValueError(f"Playlist Spotify invalide : {url_or_id!r}")
         return m.group(1)
+
+    @staticmethod
+    def parse_track_id(url_or_id: str) -> str:
+        """Extrait l'ID track base62 22 caractères depuis URL, URI ou ID brut."""
+        candidate = url_or_id.strip()
+        if re.fullmatch(r"[A-Za-z0-9]{22}", candidate):
+            return candidate
+        m = TRACK_ID_RE.search(candidate)
+        if not m:
+            raise ValueError(f"Track Spotify invalide : {url_or_id!r}")
+        return m.group(1)
+
+    def get_track_meta(self, url_or_id: str) -> TrackMeta:
+        """Métadonnées d'une track Spotify isolée."""
+        track_id = self.parse_track_id(url_or_id)
+        t = self._sp.track(track_id)
+        artists = ", ".join(
+            a["name"] for a in (t.get("artists") or []) if a.get("name")
+        )
+        album = t.get("album") or {}
+        return TrackMeta(
+            spotify_id=t["id"],
+            title=t.get("name") or "",
+            artist=artists,
+            duration_ms=int(t.get("duration_ms") or 0),
+            release_date=album.get("release_date"),
+        )
 
     def get_playlist_meta(self, url_or_id: str) -> PlaylistMeta:
         """Métadonnées (name, owner, description, count) d'une playlist."""

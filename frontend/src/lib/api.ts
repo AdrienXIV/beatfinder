@@ -19,6 +19,20 @@ export type TrackMeta = {
 	position: number;
 	has_analysis: boolean;
 	audio_path: string | null;
+	bpm: number | null;
+	key_note: string | null;
+	key_mode: 'major' | 'minor' | null;
+	key_uncertain: boolean | null;
+	is_overridden: boolean;
+	confidence_low: boolean;
+	confidence_reasons: string[];
+	bpm_alt_hypotheses: number[];
+};
+
+export type TrackOverridePayload = {
+	bpm?: number | null;
+	key_note?: string | null;
+	key_mode?: 'major' | 'minor' | null;
 };
 
 export type PatternSummary = {
@@ -248,6 +262,16 @@ export type CacheKind = 'youtube' | 'local-audio' | 'reports' | 'actions';
 
 export type AppStatus = {
 	spotify_configured: boolean;
+	version: string;
+};
+
+export type UpdateCheck = {
+	current: string;
+	latest: string | null;
+	update_available: boolean;
+	release_url: string | null;
+	release_notes: string | null;
+	published_at: string | null;
 };
 
 export type SpotifySettings = {
@@ -296,6 +320,11 @@ async function request<T>(
 			// ignore
 		}
 		throw new ApiError(res.status, String(detail));
+	}
+	// 204 No Content + Content-Length: 0 → pas de body à parser, sinon
+	// `res.json()` throw `SyntaxError: Unexpected end of JSON input`.
+	if (res.status === 204 || res.headers.get('Content-Length') === '0') {
+		return undefined as T;
 	}
 	return res.json() as Promise<T>;
 }
@@ -422,7 +451,7 @@ export const api = {
 	getBrief: (id: string, regenerate = false, f?: typeof fetch) =>
 		request<Brief>(`/playlists/${id}/brief${regenerate ? '?regenerate=true' : ''}`, undefined, f),
 
-	briefCsvUrl: (id: string) => `${API_BASE}/playlists/${id}/brief.csv`,
+	briefMdUrl: (id: string) => `${API_BASE}/playlists/${id}/brief.md`,
 
 	downloadBriefPdf: async (id: string, style: string = 'editorial'): Promise<Blob> => {
 		const res = await fetch(
@@ -443,6 +472,23 @@ export const api = {
 
 	analyze: (payload: AnalyzeRequest, f?: typeof fetch) =>
 		request<Job>('/playlists/analyze', { method: 'POST', body: JSON.stringify(payload) }, f),
+
+	analyzeTrack: (url: string, f?: typeof fetch) =>
+		request<Job>('/tracks/analyze', { method: 'POST', body: JSON.stringify({ url }) }, f),
+
+	patchTrackOverride: (spotifyId: string, payload: TrackOverridePayload, f?: typeof fetch) =>
+		request<{ bpm: number | null; key_note: string | null; key_mode: string | null }>(
+			`/tracks/${encodeURIComponent(spotifyId)}/overrides`,
+			{ method: 'PATCH', body: JSON.stringify(payload) },
+			f
+		),
+
+	deleteTrackOverride: (spotifyId: string, f?: typeof fetch) =>
+		request<void>(
+			`/tracks/${encodeURIComponent(spotifyId)}/overrides`,
+			{ method: 'DELETE' },
+			f
+		),
 
 	listJobs: (f?: typeof fetch) => request<Job[]>('/jobs', undefined, f),
 
@@ -519,9 +565,6 @@ export const api = {
 	masterChainMdUrl: (fromId: string, toId: string) =>
 		`${API_BASE}/actions/master-chain.md?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}`,
 
-	masterChainAdgUrl: (fromId: string, toId: string) =>
-		`${API_BASE}/actions/master-chain.adg?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}`,
-
 	getCacheStats: (f?: typeof fetch) => request<CacheStats>('/cache/stats', undefined, f),
 
 	flushCache: async (kind: CacheKind, f: typeof fetch = fetch): Promise<CacheFlushResult> => {
@@ -541,6 +584,9 @@ export const api = {
 
 	getStatus: (f?: typeof fetch) => request<AppStatus>('/settings/status', undefined, f),
 
+	checkUpdate: (f?: typeof fetch) =>
+		request<UpdateCheck>('/version/check', undefined, f),
+
 	getSpotifySettings: (f?: typeof fetch) =>
 		request<SpotifySettings>('/settings/spotify', undefined, f),
 
@@ -552,5 +598,88 @@ export const api = {
 		),
 
 	deleteSpotifySettings: (f?: typeof fetch) =>
-		request<SpotifySettings>('/settings/spotify', { method: 'DELETE' }, f)
+		request<SpotifySettings>('/settings/spotify', { method: 'DELETE' }, f),
+
+	// ─── Sessions créatives ──────────────────────────────────────────
+	listSessions: (f?: typeof fetch) =>
+		request<CreativeSessionSummary[]>('/sessions', undefined, f),
+
+	getSession: (id: string, f?: typeof fetch) =>
+		request<CreativeSessionDetail>(`/sessions/${encodeURIComponent(id)}`, undefined, f),
+
+	createSession: (payload: { source_url: string; ambiance?: Record<string, string> }, f?: typeof fetch) =>
+		request<CreativeSessionDetail>(
+			'/sessions',
+			{ method: 'POST', body: JSON.stringify(payload) },
+			f
+		),
+
+	lockSession: (id: string, f?: typeof fetch) =>
+		request<CreativeSessionDetail>(
+			`/sessions/${encodeURIComponent(id)}/lock`,
+			{ method: 'POST' },
+			f
+		),
+
+	unlockSession: (id: string, f?: typeof fetch) =>
+		request<CreativeSessionDetail>(
+			`/sessions/${encodeURIComponent(id)}/unlock`,
+			{ method: 'POST' },
+			f
+		),
+
+	uploadSessionVersion: (sessionId: string, file: File, f?: typeof fetch) => {
+		const fd = new FormData();
+		fd.append('file', file);
+		return multipartRequest<SessionVersion>(
+			`/sessions/${encodeURIComponent(sessionId)}/versions`,
+			fd,
+			f
+		);
+	},
+
+	archiveSession: (id: string, f?: typeof fetch) =>
+		request<void>(`/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' }, f),
+
+	deletePlaylist: (spotifyId: string, f?: typeof fetch) =>
+		request<void>(`/playlists/${encodeURIComponent(spotifyId)}`, { method: 'DELETE' }, f)
+};
+
+export type CreativeSessionSummary = {
+	spotify_id: string;
+	name: string;
+	target_kind: 'spotify_playlist' | 'spotify_track' | 'upload' | 'local_playlist';
+	target_name: string;
+	n_versions: number;
+	last_fit_score: number | null;
+	is_locked: boolean;
+	created_at: string;
+	updated_at: string;
+};
+
+export type SessionVersion = {
+	id: number;
+	version_number: number;
+	name: string;
+	fit_score: number | null;
+	created_at: string;
+};
+
+export type CreativeSessionDetail = {
+	spotify_id: string;
+	name: string;
+	target_kind: 'spotify_playlist' | 'spotify_track' | 'upload' | 'local_playlist';
+	target_ref: string;
+	target_name: string;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	target_pattern: Record<string, any>;
+	target_track: TrackMeta | null;
+	target_tracks: TrackMeta[] | null;
+	ambiance: Record<string, string> | null;
+	plan_md: string;
+	versions: SessionVersion[];
+	is_locked: boolean;
+	locked_at: string | null;
+	created_at: string;
+	updated_at: string;
 };

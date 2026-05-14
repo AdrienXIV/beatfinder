@@ -93,6 +93,12 @@ datas += [
     ('frontend/build', 'frontend/build'),
 ]
 
+# pyproject.toml pour exposer __version__ en mode binaire
+# (lu par backend.__init__._resolve_version via sys._MEIPASS).
+datas += [
+    ('pyproject.toml', '.'),
+]
+
 
 a = Analysis(
     ['run_app.py'],

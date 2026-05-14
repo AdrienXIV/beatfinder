@@ -33,3 +33,7 @@ class AnalyzeRequest(BaseModel):
     download: bool = Field(
         default=True, description="DL audio via YouTube si manquant",
     )
+
+
+class AnalyzeTrackRequest(BaseModel):
+    url: str = Field(description="URL/URI/ID Spotify d'une track isolée")

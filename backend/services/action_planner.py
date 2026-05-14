@@ -200,21 +200,21 @@ _BANDS: tuple[tuple[str, str, tuple[float, float]], ...] = (
 )
 
 _BAND_ACTIONS_DOWN: dict[str, str] = {
-    "sub":      "HP 30 Hz sur les samples non-808, sidechain compressor plus marqué (kick → 808)",
-    "bass":     "Cleanup 60-250 Hz : EQ cut sur les samples qui masquent (drums, FX), shelve down les pads",
-    "low_mid":  "Cut 250-500 Hz : enlève la boue, scoop sur les pads/synthés trop chargés",
-    "mid":      "Pull down 500 Hz - 2 kHz : moins de saturation/harmoniques sur les leads",
-    "high_mid": "Atténuer 2-6 kHz : trop agressif, de-esser sur hats/percu, EQ -1 à -2 dB",
-    "high":     "Tame 6-20 kHz : peut-être trop d'air, shelf down ou low-pass à 16 kHz",
+    "sub":      "HP 30 Hz (high-pass filter) sur les samples non-sub, sidechain compressor plus marqué (kick → sub-bass)",
+    "bass":     "Cleanup 60-250 Hz : EQ cut sur les samples qui masquent le kick (drums, FX), shelve down (atténuer les basses) sur les pads",
+    "low_mid":  "Cut 250-500 Hz : enlève la boue (accumulation low-mid qui embrouille le mix), scoop EQ (creux en cloche) sur les pads/synthés trop chargés",
+    "mid":      "Pull down 500 Hz - 2 kHz : EQ cut -2 à -4 dB en cloche pour réduire saturation/harmoniques sur les leads",
+    "high_mid": "Atténuer 2-6 kHz (bande trop agressive) : de-esser (anti-sibilance) sur hats/percu, EQ -1 à -2 dB",
+    "high":     "Adoucir 6-20 kHz (peut-être trop d'air) : shelf down (atténuer les aigus) ou low-pass à 16 kHz",
 }
 
 _BAND_ACTIONS_UP: dict[str, str] = {
-    "sub":      "Booster 808 : EQ shelf +2 dB autour de 50 Hz, vérifier que la sub-bass est en mono",
-    "bass":     "Booster 60-250 Hz : EQ shelf low, ajouter saturation harmonique sur la 808",
-    "low_mid":  "Boucher 250-500 Hz : ajouter warmth/body sur drums (saturation), pads avec harmoniques basses",
-    "mid":      "Booster 500 Hz - 2 kHz : presence sur leads/melody, EQ +1-2 dB en cloche",
-    "high_mid": "Ajouter présence 2-6 kHz : shelf +1-2 dB, brillance sur hats/snares",
-    "high":     "Plus d'air : shelf +1-2 dB au-dessus de 8 kHz, ajouter cymbal sweeps / textures hautes",
+    "sub":      "Booster sub-bass : EQ shelf +2 dB autour de 50 Hz, vérifier que la sub-bass est en mono (pas de stéréo dans les graves)",
+    "bass":     "Booster 60-250 Hz : EQ shelf low, ajouter saturation harmonique (Decapitator, Saturator) sur la ligne de basse",
+    "low_mid":  "Booster 250-500 Hz (warmth/chaleur sonore) : saturation sur drums pour épaissir, pads avec harmoniques basses",
+    "mid":      "Booster 500 Hz - 2 kHz (présence des leads/voix) : EQ +1-2 dB en cloche sur la mélodie principale",
+    "high_mid": "Ajouter présence 2-6 kHz : shelf +1-2 dB pour brillance sur hats/snares",
+    "high":     "Plus d'air (au-delà de 6 kHz) : shelf +1-2 dB au-dessus de 8 kHz, ajouter cymbal sweeps / textures hautes",
 }
 
 

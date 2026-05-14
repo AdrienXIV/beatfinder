@@ -229,7 +229,7 @@
 										<button
 											type="button"
 											onclick={() => removeRow(i)}
-											class="text-[var(--color-fg-muted)] hover:text-[var(--color-err)] text-base leading-none"
+											class="text-[var(--color-fg)] hover:text-[var(--color-err)] text-lg leading-none font-bold"
 											aria-label="Supprimer"
 										>
 											×

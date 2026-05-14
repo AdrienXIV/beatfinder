@@ -113,8 +113,8 @@
 			<div class="quote-block">
 				<blockquote>
 					Le drop principal s'inscrit autour de
-					<strong>{drop.toFixed(0)}%</strong> du titre, structure typique du rap moderne où
-					l'intro et le buildup occupent près d'un tiers du morceau.
+					<strong>{drop.toFixed(0)}%</strong> du titre, structure où l'intro et
+					le buildup occupent près d'un tiers du morceau.
 				</blockquote>
 			</div>
 			<h4 class="ssect">SUB ÉCRASANT</h4>
@@ -122,7 +122,7 @@
 				Avec <strong>{sub.toFixed(0)}%</strong> d'énergie sous 60 Hz et
 				<strong>{bass.toFixed(0)}%</strong> entre 60 et 250 Hz, le bas du spectre cumule
 				<strong>{(sub + bass).toFixed(0)}%</strong> de l'énergie totale — un trait
-				caractéristique du genre dominé par la 808.
+				caractéristique des productions à basses synthétiques dominantes.
 			</p>
 		</div>
 	</section>

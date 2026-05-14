@@ -9,7 +9,7 @@
 	let { children } = $props();
 
 	const links = [
-		{ href: '/', label: 'Playlists' },
+		{ href: '/', label: 'Dashboard' },
 		{ href: '/analyze', label: 'Analyser Spotify' },
 		{ href: '/projects/new', label: 'Upload local' },
 		{ href: '/compare', label: 'Comparer' },
@@ -28,13 +28,81 @@
 	const isSettingsRoute = $derived(page.url.pathname.startsWith('/settings'));
 
 	let spotifyConfigured = $state<boolean | null>(null);
+	let appVersion = $state<string | null>(null);
 	async function refreshStatus() {
 		try {
 			const s = await api.getStatus();
 			spotifyConfigured = s.spotify_configured;
+			appVersion = s.version;
 		} catch {
 			spotifyConfigured = null;
 		}
+	}
+
+	// ─── Check nouvelle version via GitHub Releases ────────────────────
+	// Appel séparé (peut être lent/down). Caché côté client 12h pour ne
+	// pas spammer GitHub à chaque navigation. Dismissable via localStorage.
+	let updateLatest = $state<string | null>(null);
+	let updateUrl = $state<string | null>(null);
+	const UPDATE_CACHE_KEY = 'beatfinder:update-check';
+	const UPDATE_CACHE_MS = 12 * 60 * 60 * 1000; // 12h
+	const UPDATE_DISMISS_KEY_PREFIX = 'beatfinder:update-dismissed:';
+
+	async function checkUpdate() {
+		try {
+			const cached = localStorage.getItem(UPDATE_CACHE_KEY);
+			if (cached) {
+				const { ts, data } = JSON.parse(cached);
+				if (Date.now() - ts < UPDATE_CACHE_MS) {
+					if (data.update_available) {
+						applyUpdate(data.latest, data.release_url);
+					}
+					return;
+				}
+			}
+		} catch {
+			// localStorage corrupted / indispo → on tente l'appel direct
+		}
+		try {
+			const r = await api.checkUpdate();
+			try {
+				localStorage.setItem(
+					UPDATE_CACHE_KEY,
+					JSON.stringify({ ts: Date.now(), data: r })
+				);
+			} catch {
+				// ignore
+			}
+			if (r.update_available) {
+				applyUpdate(r.latest, r.release_url);
+			}
+		} catch {
+			// silent : si GitHub down ou rate-limited, on n'affiche rien
+		}
+	}
+
+	function applyUpdate(latest: string | null, url: string | null) {
+		if (!latest) return;
+		try {
+			if (localStorage.getItem(UPDATE_DISMISS_KEY_PREFIX + latest)) {
+				return; // user a déjà fermé cette version
+			}
+		} catch {
+			// ignore
+		}
+		updateLatest = latest;
+		updateUrl = url;
+	}
+
+	function dismissUpdate() {
+		if (!updateLatest) return;
+		try {
+			localStorage.setItem(UPDATE_DISMISS_KEY_PREFIX + updateLatest, '1');
+		} catch {
+			// ignore
+		}
+		updateLatest = null;
+		updateUrl = null;
 	}
 
 	// Onboarding 1er lancement : afficher le wizard si jamais vu ET si pas encore
@@ -43,6 +111,7 @@
 	let showOnboarding = $state(false);
 	onMount(async () => {
 		await refreshStatus();
+		checkUpdate(); // background, ne bloque pas
 		if (page.url.searchParams.get('onboarding') === 'force') {
 			showOnboarding = true;
 			return;
@@ -88,10 +157,12 @@
 				<a href="/" class="flex items-center gap-2.5">
 					<span class="inline-block h-2.5 w-2.5 rounded-sm bg-[var(--color-accent)]"></span>
 					<span class="font-semibold tracking-tight">Beatfinder</span>
-					<span
-						class="ml-1 rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wider text-[var(--color-fg-muted)]"
-						>v1.6</span
-					>
+					{#if appVersion}
+						<span
+							class="ml-1 rounded bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-wider text-[var(--color-fg-muted)]"
+							>v{appVersion}</span
+						>
+					{/if}
 				</a>
 				<nav class="flex items-center gap-1">
 					{#each links as link}
@@ -110,6 +181,41 @@
 				</nav>
 			</div>
 		</header>
+
+		{#if updateLatest && !isPrintRoute}
+			<div class="no-print border-b border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10">
+				<div class="mx-auto max-w-6xl px-6 py-2.5 flex items-center justify-between gap-4 text-sm flex-wrap">
+					<div class="flex items-center gap-2">
+						<span aria-hidden="true" class="text-[var(--color-accent)]">↑</span>
+						<span class="text-[var(--color-fg)]">
+							<strong>Nouvelle version <span class="font-mono">{updateLatest}</span> disponible.</strong>
+							Tu es sur <span class="font-mono text-[var(--color-fg-muted)]">v{appVersion ?? '?'}</span>.
+						</span>
+					</div>
+					<div class="flex items-center gap-2">
+						{#if updateUrl}
+							<a
+								href={updateUrl}
+								target="_blank"
+								rel="noopener noreferrer"
+								class="rounded-md border border-[var(--color-accent)] bg-[var(--color-accent)]/20 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-[var(--color-accent)] hover:bg-[var(--color-accent)]/30 whitespace-nowrap"
+							>
+								Télécharger →
+							</a>
+						{/if}
+						<button
+							type="button"
+							onclick={dismissUpdate}
+							class="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] px-2 py-1"
+							aria-label="Ignorer cette notification"
+							title="Ignorer (jusqu'à la prochaine version)"
+						>
+							×
+						</button>
+					</div>
+				</div>
+			</div>
+		{/if}
 
 		{#if spotifyConfigured === false && !isSettingsRoute}
 			<div class="no-print border-b border-[var(--color-warn)]/40 bg-[var(--color-warn)]/10">

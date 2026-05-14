@@ -9,13 +9,14 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from backend.api.deps import get_job_queue, get_session
+from backend.api.deps import get_data_dir, get_job_queue, get_session
 from backend.api.job_runner import run_analyze_job
 from backend.api.jobs import JobQueue
 from backend.api.schemas import (
@@ -32,13 +33,20 @@ from backend.domain.models import (
     PlaylistPattern,
     PlaylistTrack,
     TrackAnalysis,
+    TrackOverride,
 )
 from backend.infrastructure.settings_store import load_settings
+from backend.services.track_overrides import (
+    apply_overrides,
+    bpm_alt_hypotheses,
+    compute_confidence,
+)
 
 router = APIRouter(prefix="/playlists", tags=["playlists"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
 QueueDep = Annotated[JobQueue, Depends(get_job_queue)]
+DataDirDep = Annotated[Path, Depends(get_data_dir)]
 
 
 def _load_playlist_or_404(session: Session, spotify_id: str) -> Playlist:
@@ -109,6 +117,33 @@ def list_playlists(session: SessionDep) -> list[PlaylistSummaryOut]:
     ]
 
 
+@router.delete("/{spotify_id}", status_code=204)
+def delete_playlist(
+    spotify_id: str, session: SessionDep, data_dir: DataDirDep,
+) -> None:
+    """Supprime une playlist Spotify (cascade auto sur PlaylistTrack + Patterns).
+
+    Garde intactes les Track + TrackAnalysis (peuvent être référencées par
+    d'autres playlists ou sessions). Supprime aussi le brief markdown en cache.
+    """
+    from backend.local_projects import brief_filename
+    p = session.scalar(
+        select(Playlist).where(Playlist.spotify_id == spotify_id),
+    )
+    if p is None:
+        raise HTTPException(
+            status_code=404, detail=f"Playlist {spotify_id!r} not found",
+        )
+    session.delete(p)
+    session.commit()
+    brief_path = data_dir / "reports" / f"{brief_filename(spotify_id)}.md"
+    if brief_path.is_file():
+        try:
+            brief_path.unlink()
+        except OSError:
+            pass
+
+
 @router.get("/{spotify_id}", response_model=PlaylistDetailOut)
 def get_playlist(spotify_id: str, session: SessionDep) -> PlaylistDetailOut:
     """Détail playlist : meta + tracks (avec presence analysis) + patterns."""
@@ -142,23 +177,45 @@ def get_playlist(spotify_id: str, session: SessionDep) -> PlaylistDetailOut:
         for a in latest_rows:
             latest_by_track[a.track_id] = a
 
-    tracks_out = [
-        TrackOut(
+    # Charger les overrides en bulk pour les tracks de cette playlist.
+    overrides_by_track: dict[int, TrackOverride] = {}
+    if track_ids:
+        overrides = session.scalars(
+            select(TrackOverride).where(TrackOverride.track_id.in_(track_ids)),
+        ).all()
+        for ov in overrides:
+            overrides_by_track[ov.track_id] = ov
+
+    def _track_to_out(pt: PlaylistTrack) -> TrackOut:
+        analysis = latest_by_track.get(pt.track_id)
+        raw_features = (analysis.features_json or {}) if analysis else {}
+        override = overrides_by_track.get(pt.track_id)
+        features = apply_overrides(raw_features, override)
+        tempo = features.get("tempo") or {}
+        tonality = features.get("tonality") or {}
+
+        confidence_low, confidence_reasons = compute_confidence(raw_features)
+
+        return TrackOut(
             spotify_id=pt.track.spotify_id,
             title=pt.track.title,
             artist=pt.track.artist,
             duration_ms=pt.track.duration_ms,
             release_date=pt.track.release_date,
             position=pt.position,
-            has_analysis=pt.track_id in latest_by_track,
-            audio_path=(
-                latest_by_track[pt.track_id].audio_path
-                if pt.track_id in latest_by_track
-                else None
-            ),
+            has_analysis=analysis is not None,
+            audio_path=analysis.audio_path if analysis else None,
+            bpm=tempo.get("bpm"),
+            key_note=tonality.get("note"),
+            key_mode=tonality.get("mode"),
+            key_uncertain=tonality.get("is_uncertain"),
+            is_overridden=override is not None,
+            confidence_low=confidence_low,
+            confidence_reasons=confidence_reasons,
+            bpm_alt_hypotheses=bpm_alt_hypotheses(tempo.get("bpm")),
         )
-        for pt in pt_rows
-    ]
+
+    tracks_out = [_track_to_out(pt) for pt in pt_rows]
 
     patterns = sorted(p.patterns, key=lambda pat: pat.id, reverse=True)
     patterns_out = [_pattern_to_summary(pat) for pat in patterns]
