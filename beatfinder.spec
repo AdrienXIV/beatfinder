@@ -96,6 +96,34 @@ hiddenimports += [
     'pydantic.deprecated.decorator',
 ]
 
+# pyobjc (macOS uniquement) — NSApplicationDelegate pour capturer les clics Dock.
+# Sans ces hiddenimports, PyInstaller ne ramasse pas les modules ObjC dynamiques
+# et le bundle .app n'arrive pas à charger AppKit/PyObjCTools au runtime.
+if IS_MAC:
+    pyobjc_core_collected = collect_all('objc')
+    pyobjc_appkit_collected = collect_all('AppKit')
+    pyobjc_foundation_collected = collect_all('Foundation')
+    pyobjc_appkit_helper_collected = collect_all('PyObjCTools')
+    datas += (
+        pyobjc_core_collected[0]
+        + pyobjc_appkit_collected[0]
+        + pyobjc_foundation_collected[0]
+        + pyobjc_appkit_helper_collected[0]
+    )
+    binaries += (
+        pyobjc_core_collected[1]
+        + pyobjc_appkit_collected[1]
+        + pyobjc_foundation_collected[1]
+        + pyobjc_appkit_helper_collected[1]
+    )
+    hiddenimports += (
+        pyobjc_core_collected[2]
+        + pyobjc_appkit_collected[2]
+        + pyobjc_foundation_collected[2]
+        + pyobjc_appkit_helper_collected[2]
+        + ['objc', 'AppKit', 'Foundation', 'PyObjCTools', 'PyObjCTools.AppHelper']
+    )
+
 # Frontend static
 datas += [
     ('frontend/build', 'frontend/build'),

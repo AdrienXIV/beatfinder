@@ -481,18 +481,88 @@ def _focus_existing_window(host: str, port: int) -> None:
         log.warning("Could not focus existing window: %s", exc)
 
 
-def main() -> None:
-    """Standalone launcher pour packaging desktop."""
+def _can_use_appkit() -> bool:
+    """True si on est sur macOS ET que pyobjc est disponible.
+
+    Sur Mac avec pyobjc, on peut installer un NSApplicationDelegate qui
+    capture les clics Dock (event reopen) → on route vers _focus_existing_window
+    qui raise la fenêtre Chrome --app au front. Sans ça (Linux/Windows ou Mac
+    sans pyobjc), comportement original : uvicorn bloque le main thread, et
+    macOS active Chrome.app au clic Dock qui ouvre une New Tab vide.
+    """
+    if sys.platform != "darwin":
+        return False
+    try:
+        import AppKit  # noqa: F401
+        from PyObjCTools import AppHelper  # noqa: F401
+    except ImportError:
+        log.warning("pyobjc absent — clic Dock macOS ne sera pas géré (cf. v2.1.4)")
+        return False
+    return True
+
+
+def _main_macos_with_appkit() -> None:
+    """Sur macOS avec pyobjc : NSApplication sur main thread + uvicorn dans
+    thread daemon. Le NSApplicationDelegate capture le clic Dock et raise
+    la fenêtre Chrome --app au lieu de laisser Chrome.app spawner une New Tab.
+    """
+    import threading
+
+    import uvicorn
+    from AppKit import NSApplication, NSObject
+    from PyObjCTools import AppHelper
+
+    load_dotenv()
+    get_settings.cache_clear()
+    settings = get_settings()
+    host = settings.beatfinder_host
+    port = settings.beatfinder_port
+
+    # Single-instance guard. Avec LSMultipleInstancesProhibited dans Info.plist
+    # macOS ne devrait plus respawner au clic Dock, mais on garde en filet
+    # pour cas marginaux (autre process déjà sur le port, etc.).
+    if _is_port_in_use(host, port):
+        log.info("Beatfinder déjà actif sur %s:%d — focus + exit", host, port)
+        _focus_existing_window(host, port)
+        return
+
+    class _BeatfinderDelegate(NSObject):
+        def applicationShouldHandleReopen_hasVisibleWindows_(  # noqa: N802
+            self, sender, has_visible
+        ):
+            log.info(
+                "Dock click reopen reçu (has_visible=%s) — focus fenêtre Chrome",
+                has_visible,
+            )
+            _focus_existing_window(host, port)
+            return False  # On a géré, ne pas faire le default Cocoa qui activait Chrome.app
+
+    app_ns = NSApplication.sharedApplication()
+    delegate = _BeatfinderDelegate.alloc().init()
+    app_ns.setDelegate_(delegate)
+
+    def _run_server() -> None:
+        if FRONTEND_BUILD.is_dir() and not settings.beatfinder_no_auto_open:
+            _open_browser_when_ready(host, port)
+        uvicorn.run(
+            app, host=host, port=port, reload=False, log_level="info",
+        )
+
+    threading.Thread(target=_run_server, daemon=True).start()
+    log.info("NSApplication event loop started — uvicorn en thread daemon")
+    AppHelper.runEventLoop()
+
+
+def _main_default() -> None:
+    """Comportement original : uvicorn bloque le main thread.
+    Utilisé sur Linux, Windows, et macOS sans pyobjc (fallback).
+    """
     import uvicorn
 
     load_dotenv()
     get_settings.cache_clear()
     settings = get_settings()
 
-    # Single-instance guard : si une instance Beatfinder tourne déjà sur
-    # ce port (cas typique macOS : clic dock icon re-exécute le binaire),
-    # on focus la fenêtre existante et on exit. Évite "Chrome ouvre Google
-    # parce que --app=URL est refusé pour duplicate user-data-dir".
     if _is_port_in_use(settings.beatfinder_host, settings.beatfinder_port):
         log.info(
             "Beatfinder instance already running on %s:%d — focusing existing window",
@@ -511,6 +581,14 @@ def main() -> None:
         reload=False,
         log_level="info",
     )
+
+
+def main() -> None:
+    """Standalone launcher pour packaging desktop."""
+    if _can_use_appkit():
+        _main_macos_with_appkit()
+    else:
+        _main_default()
 
 
 if __name__ == "__main__":

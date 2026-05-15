@@ -27,6 +27,12 @@ SQLAlchemy>=2.0.0,<3.0.0
 # Config
 python-dotenv>=1.0.0,<2.0.0
 
+# macOS — NSApplicationDelegate pour capturer les clics Dock (handler reopen)
+# Sans ça, clic Dock active Chrome.app qui ouvre une New Tab vide. Avec, on
+# route le reopen vers _focus_existing_window qui raise la fenêtre Chrome --app.
+pyobjc-core>=10.0; sys_platform == "darwin"
+pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+
 # Dev
 pytest>=8.0.0,<9.0.0
 pytest-asyncio>=0.23.0,<1.0.0
