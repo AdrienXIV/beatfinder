@@ -26,6 +26,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
+from backend import __version__
 from backend.api import (
     routes_actions,
     routes_jobs,
@@ -93,7 +94,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Beatfinder API",
-        version="1.7",
+        version=__version__,
         description=(
             "Backend FastAPI pour Beatfinder — analyse playlists Spotify "
             "(rap/trap/house) et extraction de patterns audio."
@@ -121,7 +122,7 @@ def create_app() -> FastAPI:
     async def health() -> HealthOut:
         return HealthOut(
             status="ok",
-            version="1.7",
+            version=__version__,
             data_dir=str(app.state.data_dir),
         )
 

@@ -12,11 +12,19 @@ Output: dist/beatfinder/beatfinder (binaire + dossier libs)
         + dist/Beatfinder.app sur macOS (bundle natif avec icône Dock)
 """
 import sys
+import tomllib
+from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
 IS_MAC = sys.platform == 'darwin'
+
+# Source unique de vérité pour la version : pyproject.toml. Lue ici à build
+# time pour qu'elle soit injectée dans le CFBundle macOS (Get Info / Finder).
+# Mêmes valeurs que backend.__version__ au runtime — pas de drift possible.
+with open(Path(SPECPATH) / 'pyproject.toml', 'rb') as _f:
+    APP_VERSION = tomllib.load(_f)['project']['version']
 
 
 # Collect everything pour les libs sensibles (modèles, plugins, lazy imports)
@@ -178,8 +186,8 @@ if IS_MAC:
         info_plist={
             'CFBundleName': 'Beatfinder',
             'CFBundleDisplayName': 'Beatfinder',
-            'CFBundleShortVersionString': '2.0',
-            'CFBundleVersion': '2.0',
+            'CFBundleShortVersionString': APP_VERSION,
+            'CFBundleVersion': APP_VERSION,
             'LSMinimumSystemVersion': '11.0',
             'NSHighResolutionCapable': True,
             'LSUIElement': False,

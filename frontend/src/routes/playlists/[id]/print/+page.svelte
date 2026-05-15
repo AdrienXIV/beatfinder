@@ -3,7 +3,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import type { PageData } from './$types';
-	import { isLocalProject } from '$lib/api';
+	import { api, isLocalProject } from '$lib/api';
 	import BriefRenderer from '$lib/components/BriefRenderer.svelte';
 	import SpectralRing from '$lib/components/charts/SpectralRing.svelte';
 	import BpmHistogram from '$lib/components/charts/BpmHistogram.svelte';
@@ -60,10 +60,12 @@
 	}
 
 	let chartsReady = $state(false);
+	let appVersion = $state<string | null>(null);
 	onMount(() => {
 		// Donne aux canvas Chart.js le temps de se mounter avant qu'un éventuel print
 		// déclenché manuellement les capture.
 		setTimeout(() => (chartsReady = true), 400);
+		api.getStatus().then((s) => (appVersion = s.version)).catch(() => {});
 	});
 </script>
 
@@ -83,7 +85,7 @@
 		<div class="brief-mark">
 			<span class="dot"></span>
 			<span class="brand">Beatfinder</span>
-			<span class="version">v1.7</span>
+			{#if appVersion}<span class="version">v{appVersion}</span>{/if}
 		</div>
 		<h1>Brief de production</h1>
 		<h2>
