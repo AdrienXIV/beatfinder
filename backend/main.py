@@ -406,10 +406,16 @@ def _focus_existing_window(host: str, port: int) -> None:
     """Focus la fenêtre Beatfinder existante (cas reopen via dock macOS).
 
     Sur macOS, clic sur l'icône dock d'une app déjà lancée re-exécute le
-    binaire. Sans handler, Chrome `--app=URL` refuserait d'ouvrir une
-    seconde instance même URL/profile et tomberait sur Google. On évite ça
-    en activant + amenant au premier plan la fenêtre Chrome existante via
-    AppleScript.
+    binaire. La fenêtre Beatfinder tourne dans une instance Chrome séparée
+    (via `--user-data-dir=~/.beatfinder/.browser-profile`). On NE PEUT PAS
+    utiliser `tell application "Google Chrome" to activate` : ça cible le
+    Chrome perso de l'utilisateur (instance principale), qui spawne sa page
+    d'accueil (Google) si pas déjà ouvert — la fenêtre Beatfinder reste
+    derrière.
+
+    Solution : retrouver le PID du process Chrome qui tourne avec notre
+    profile-dir via `pgrep -f`, puis activer ce process précis via
+    `System Events`. Robuste, ne touche pas au Chrome perso.
 
     Sur Linux/Windows : pas d'équivalent simple — on log et on exit.
     """
@@ -420,22 +426,37 @@ def _focus_existing_window(host: str, port: int) -> None:
         log.info("Already running on %s:%d, exiting", host, port)
         return
 
-    url_prefix = f"http://{host}:{port}"
-    script = f"""
-    tell application "Google Chrome"
-        activate
-        set windowList to every window
-        repeat with w in windowList
-            set tabList to every tab of w
-            repeat with t in tabList
-                if URL of t starts with "{url_prefix}" then
-                    set index of w to 1
-                    return
-                end if
-            end repeat
-        end repeat
-    end tell
-    """
+    profile_dir = str(Path.home() / ".beatfinder" / ".browser-profile")
+
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", profile_dir],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+        pids = [p for p in result.stdout.strip().split("\n") if p.isdigit()]
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        log.warning("pgrep failed while looking for Beatfinder Chrome: %s", exc)
+        return
+
+    if not pids:
+        log.warning(
+            "No Chrome process found for profile-dir %s — uvicorn tourne mais "
+            "la fenêtre app a été fermée. Rien à focus.",
+            profile_dir,
+        )
+        return
+
+    # On prend le premier PID — c'est le process Chrome racine de notre
+    # instance (les Helpers et Renderers descendent de lui mais on n'en a
+    # pas besoin pour System Events).
+    pid = pids[0]
+    script = (
+        'tell application "System Events" to '
+        f"set frontmost of (first process whose unix id is {pid}) to true"
+    )
     try:
         subprocess.run(
             ["osascript", "-e", script],
@@ -444,7 +465,7 @@ def _focus_existing_window(host: str, port: int) -> None:
             check=False,
             timeout=3,
         )
-        log.info("Focused existing Beatfinder window via AppleScript")
+        log.info("Focused existing Beatfinder Chrome process (PID %s)", pid)
     except (OSError, subprocess.TimeoutExpired) as exc:
         log.warning("Could not focus existing window: %s", exc)
 
