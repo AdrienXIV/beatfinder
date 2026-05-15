@@ -458,14 +458,25 @@ def _focus_existing_window(host: str, port: int) -> None:
         f"set frontmost of (first process whose unix id is {pid}) to true"
     )
     try:
-        subprocess.run(
+        # On capture stderr (au lieu de DEVNULL) pour pouvoir logger les
+        # refus TCC. Sans NSAppleEventsUsageDescription dans Info.plist,
+        # macOS 13+ avalait silencieusement les refus — le bug du dock
+        # click était indétectable par les logs Python.
+        result = subprocess.run(
             ["osascript", "-e", script],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
             check=False,
             timeout=3,
         )
-        log.info("Focused existing Beatfinder Chrome process (PID %s)", pid)
+        if result.returncode == 0:
+            log.info("Focused existing Beatfinder Chrome process (PID %s)", pid)
+        else:
+            log.warning(
+                "osascript focus failed (exit=%s): %s",
+                result.returncode,
+                (result.stderr or "").strip() or "(no stderr)",
+            )
     except (OSError, subprocess.TimeoutExpired) as exc:
         log.warning("Could not focus existing window: %s", exc)
 

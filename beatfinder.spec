@@ -191,5 +191,21 @@ if IS_MAC:
             'LSMinimumSystemVersion': '11.0',
             'NSHighResolutionCapable': True,
             'LSUIElement': False,
+            # Empêche macOS de spawner une 2e instance du binaire au clic
+            # Dock quand l'app tourne déjà. Sans ça, chaque clic Dock spawnait
+            # une nouvelle instance qui faisait pgrep + osascript (qui rate
+            # silencieusement par TCC) puis exit. Côté user : "Chrome perso
+            # apparaît au lieu de la fenêtre Beatfinder". Diagnostiqué via
+            # logs unifiés macOS sur Mac de Quentin (2026-05-15).
+            'LSMultipleInstancesProhibited': True,
+            # Texte affiché par TCC quand on tente un AppleEvent vers une
+            # autre app (ex: System Events depuis _focus_existing_window).
+            # Sans cette clé, macOS 13+ refuse silencieusement sans prompter
+            # l'utilisateur.
+            'NSAppleEventsUsageDescription': (
+                'Beatfinder a besoin d\'envoyer des AppleEvents pour ramener '
+                'la fenêtre de l\'app au premier plan quand tu cliques sur '
+                'son icône dans le Dock.'
+            ),
         },
     )
