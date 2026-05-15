@@ -29,6 +29,17 @@ Outil desktop d'analyse de playlists Spotify (ou tracks audio locales) qui extra
 
 **Si tu lances le binaire PyInstaller direct** (sans AppImage) : `./dist/beatfinder/beatfinder` — même comportement.
 
+#### macOS (DMG)
+
+1. Télécharge `beatfinder-macos-arm64.dmg` (~192 MB, Apple Silicon M1/M2/M3/M4).
+2. Double-clic pour monter, glisse `Beatfinder.app` dans le raccourci `Applications`.
+3. **Premier lancement** : macOS Gatekeeper bloque (app non signée). Solution : clic droit sur `Beatfinder.app` dans `/Applications` → *Ouvrir* → *Ouvrir quand même*. Ou *Réglages Système → Confidentialité et sécurité → Ouvrir quand même*. Une seule fois, ensuite double-clic normal.
+4. Pré-requis : Chrome ou Brave installé (l'app lance une fenêtre Chromium).
+
+**Mise à jour propre** (si après upgrade Finder/Get Info montre encore l'ancienne version) : le DMG contient un script `uninstall_macos.command`. Double-clic dessus dans le DMG monté → il supprime `/Applications/Beatfinder.app`, démonte les volumes et reset le cache LaunchServices. Tu peux ensuite ré-installer proprement. Cause : LaunchServices cache la metadata par bundle ID, le drag-and-drop seul ne suffit pas toujours à rafraîchir Finder.
+
+**Données utilisateur Mac** : `~/.beatfinder/data/`. Le script avec `--purge` (lance-le en CLI) supprime aussi ces données.
+
 ### B. Sources (développement)
 
 #### Pré-requis

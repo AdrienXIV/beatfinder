@@ -169,11 +169,16 @@ jobs:
         # éjecte, lance. UX classique macOS (Slack/VS Code/Discord font ça).
         #
         # On prépare d'abord un dossier source avec l'app + un alias vers
-        # /Applications, puis hdiutil crée le DMG compressé UDZO.
+        # /Applications + le script uninstall_macos.command (utile aux
+        # utilisateurs qui upgradent — LaunchServices peut cacher l'ancienne
+        # version après drag-and-drop, ce script reset le cache proprement),
+        # puis hdiutil crée le DMG compressé UDZO.
         run: |
           mkdir -p dmg-source
           cp -R dist/Beatfinder.app dmg-source/
           ln -s /Applications dmg-source/Applications
+          cp scripts/uninstall_macos.command dmg-source/
+          chmod +x dmg-source/uninstall_macos.command
           hdiutil create \
             -volname Beatfinder \
             -srcfolder dmg-source \
