@@ -62,6 +62,8 @@ python -m venv .venv
 .venv/bin/pip install --upgrade pip wheel cython
 .venv/bin/pip install -r requirements.txt
 .venv/bin/pip install "madmom @ git+https://github.com/CPJKU/madmom@main"
+# Optionnel — uniquement si tu veux build le binaire desktop (./build.sh)
+.venv/bin/pip install -r requirements-dev.txt
 
 # Frontend
 cd frontend && npm install && cd ..

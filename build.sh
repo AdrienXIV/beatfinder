@@ -10,7 +10,8 @@
 # Pré-requis :
 #  - venv Python avec --enable-shared (sinon erreur "Python built without shared lib")
 #    Rebuild via : PYTHON_CONFIGURE_OPTS="--enable-shared" pyenv install -f <version>
-#  - requirements.txt + pyinstaller installés
+#  - requirements.txt + requirements-dev.txt installés
+#    (.venv/bin/pip install -r requirements.txt -r requirements-dev.txt)
 #  - Node + npm
 
 set -euo pipefail
@@ -20,7 +21,8 @@ ROOT="$PWD"
 VENV="$ROOT/.venv"
 
 if [[ ! -x "$VENV/bin/pyinstaller" ]]; then
-  echo "✗ pyinstaller absent du venv. Installe : $VENV/bin/pip install pyinstaller"
+  echo "✗ pyinstaller absent du venv."
+  echo "  Installe : $VENV/bin/pip install -r requirements-dev.txt"
   exit 1
 fi
 
@@ -28,6 +30,16 @@ echo "→ build frontend (npm run build)"
 cd "$ROOT/frontend"
 npm run build
 cd "$ROOT"
+
+# Sur macOS, génère packaging/Beatfinder.icns si absent (le .icns est
+# gitignored car binaire OS-spécifique). PyInstaller BUNDLE le requiert
+# → sans ce step, le build crash avec "Icon input file ... not found".
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  if [[ ! -f "$ROOT/packaging/Beatfinder.icns" ]]; then
+    echo "→ packaging/Beatfinder.icns absent, génération via gen_icns_mac.sh"
+    "$ROOT/scripts/gen_icns_mac.sh"
+  fi
+fi
 
 echo "→ build binaire PyInstaller (beatfinder.spec, low priority)"
 # nice/ionice : PyInstaller pic à 3-5 GB RAM pendant l'analyse + collect des libs

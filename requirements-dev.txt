@@ -1,0 +1,10 @@
+# Dépendances pour les workflows de build/dev — pas requises au runtime de l'app.
+#
+# Install : .venv/bin/pip install -r requirements-dev.txt
+# (suit l'install de requirements.txt qui contient les deps runtime)
+
+# Packaging desktop : crée le binaire standalone (Linux/Mac/Windows)
+pyinstaller>=6.0
+
+# Génération d'icône depuis le code Python (gen_icon.py + gen_icns_mac.sh sur Mac)
+pillow>=10.0
