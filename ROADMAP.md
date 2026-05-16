@@ -1,15 +1,27 @@
 # Beatfinder — Roadmap
 
-État actuel : **V2.1.4 — dock click macOS définitivement fixé**.
+État actuel : **Sprint 11 — sessions V2 + upload SSE + validation pipeline
+(2026-05-16)**. Page session locked enrichie : SessionEvolutionCharts
+(fit_score + 4 sparklines features critiques avec ligne cible pointillée),
+VersionsRecapTable (cellules colorées vert/jaune/rouge selon distance
+p25-p75, sticky cible + auto-scroll droite pour scaler à 50+ versions),
+VersionDetailModal drill-down par version. Upload version converti en
+job/SSE avec modal de progression + logs temps réel + bouton annuler (avant :
+spinner aveugle 10-30s). Prévalidation URL Spotify côté wizard (rejet
+explicite album/artist/show/episode avec messages d'aide). Script
+`backend/cli/validate_pipeline.py` qui applique 10 transforms connus à un
+audio source + vérifie cohérence des analyzers (14/14 checks OK = pipeline
+fiable, à lancer avant chaque release).
+
+État précédent : V2.1.4 — dock click macOS définitivement fixé.
 Combo `LSMultipleInstancesProhibited` (Info.plist) + `NSApplicationDelegate`
 pyobjc qui capte l'event `applicationShouldHandleReopen` au clic Dock et
-focus la fenêtre Chrome `--app` via PID isolé (osascript ciblé, pas le
-bundle Google Chrome qui spawnerait une page d'accueil). Validé empiriquement
+focus la fenêtre Chrome `--app` via PID isolé. Validé empiriquement
 sur Mac de Quentin le 2026-05-16 : 18 events captés successivement, focus
 visuel confirmé. Cosmétique restante : Chrome.app reste affiché au Dock en
 parallèle de Beatfinder.app (pistes documentées en idées long terme).
 
-État précédent : V2.1.0 — sessions guidées + corrections track + auto-update.
+État archivé : V2.1.0 — sessions guidées + corrections track + auto-update.
 Repo public sur `github.com/AdrienXIV/beatfinder` (all rights reserved sans
 LICENSE). Banner UI auto-détecte les nouvelles releases GitHub. Wizard 3
 étapes (cible → ambiance → analyse) + état draft/locked. Modal de correction
@@ -18,6 +30,12 @@ via `PENDING_COLUMN_MIGRATIONS` au boot.
 
 État archivé : V2.0.14 — distribution cross-platform (CI GitHub Actions
 actif, 3 binaires natifs Linux/Mac/Windows).
+
+> **Avant tag git d'une release** : consulter la mémoire
+> `project_beatfinder_release_checklist.md` ET lancer
+> `.venv/bin/python -m backend.cli.validate_pipeline data/audio/<un_mp3>.mp3 --duration 30`
+> qui doit retourner **14/14 checks OK** (le check Sub peut SKIP honnêtement
+> si l'audio source n'a pas de contenu sub).
 
 ## Sprints livrés
 
@@ -325,6 +343,153 @@ alternatives explorées en "Idées long terme — cosmétique macOS" plus bas.
   cette session : copie depuis le `.app` v2.1.3 préexistant. À factoriser
   en helper script (cf. Court terme).
 
+### Sprint 11 — Sessions V2 (UX) + upload SSE + validation pipeline (2026-05-16)
+
+Grosse session d'enrichissement post-debug dock click. Quatre chantiers
+distincts, tous livrés et type-checkés.
+
+**Sessions UI — comparatif multi-versions (killer feature)**
+
+Avant : la page session locked affichait juste une liste de cards `vN | fit_score`,
+aucun moyen de comprendre l'évolution ni de drill-down dans une version.
+
+- **Backend** : 1 ligne — `SessionVersionOut` expose maintenant `features_json: dict`.
+  La data était déjà en DB (`SessionVersion.features_json`), juste pas exposée par l'API.
+- **`frontend/src/lib/session-comparison.ts`** : helpers purs (zéro deps frontend) —
+  `KEY_FEATURES` (13 features clés : LUFS, true_peak, crest, DR, BPM, centroid,
+  6 bandes spectrales, drop position), `getStatus(value, stats)` (vert si dans
+  p25-p75, jaune si dans [min,max], rouge sinon), formatters (valeur, target, delta).
+- **`SessionEvolutionCharts.svelte`** : 1 gros graph fit_score 0-100% en haut + 4
+  sparklines features critiques (LUFS, sub, centroid, crest) avec ligne pointillée
+  verte pour la cible (médiane). Chart.js, animations désactivées pour perfs.
+- **`VersionsRecapTable.svelte`** : tableau `Cible | v1 | v2 ... | vN` × 13 lignes
+  features. Cellules colorées vert/jaune/rouge selon distance à la cible.
+  Headers cliquables pour drill-down. P25-p75 affiché sous chaque label.
+- **`VersionDetailModal.svelte`** : modal 75vw groupée en sections (Tonalité,
+  Mastering, Dynamique, Rythme, Spectre, Structure). Pour chaque feature : valeur
+  version, cible, delta, range cible. Header avec fit_score grand format.
+- **Intégration page session locked** : charts d'évolution + tableau récap au-dessus
+  de l'historique (qui reste comme fallback compact). Plan A→Z démarre collapsed
+  par défaut (avant : ouvert, prenait toute la place).
+
+**Robustesse scaling — table & charts à 50+ versions**
+
+Anticipation : si l'utilisateur monte à 50 versions sur une session, le tableau
+deviendrait illisible (5600px scroll horizontal, dernière version hors écran)
+et les charts blob orange (labels chevauchés, points superposés).
+
+- **`VersionsRecapTable`** : colonne "Feature" (`w-[170px]`) + colonne "Cible"
+  (`sticky left-[170px]`) toutes les deux figées à gauche avec ombre portée
+  droite. Auto-scroll vers la droite via `$effect` qui track `versions.length`
+  + `requestAnimationFrame` → dernière version toujours visible au mount et
+  après chaque upload. Hint texte sous le tableau si >8 versions.
+- **`SessionEvolutionCharts`** : `adaptivePointRadius(n, base)` (3px si ≤10
+  versions, base-1 si ≤25, 1px si plus) + `pointHoverRadius` augmenté pour
+  retrouver la précision au survol + `interaction.mode='index', intersect=false`
+  (tooltip s'ouvre sur la colonne entière, plus besoin de viser le point) +
+  `ticks.autoSkip + maxTicksLimit: 12` (fit) / 8 (sparklines) → labels propres.
+  Résultat : scale gracieusement de 5 à 500 versions sans rien casser.
+
+**Prévalidation URL Spotify dans le wizard de session**
+
+Bug UX : coller un lien d'album/artist/show/episode Spotify déclenchait une
+cascade 404 → retry analyse → 400 "Playlist Spotify invalide" → message confus
+après attente.
+
+- **`frontend/src/lib/spotify-url.ts`** : `detectSpotifyUrl(input)` → `{type, id,
+  supported}`. Détecte track/playlist/album/artist/show/episode + ID brut 22
+  chars. `spotifyTypeLabel(type)` pour affichage FR.
+- **`SessionWizardModal`** : feedback live sous l'input URL (vert + label si
+  track/playlist, rouge avec message d'aide spécifique au type non supporté,
+  jaune ambigu pour ID brut). Bordure input change de couleur. Bouton Suivant
+  désactivé si type non supporté.
+- **Defense in depth backend** : `_resolve_source` dans `routes_sessions.py`
+  détecte explicitement album/artist/show/episode via regex et lève
+  `HTTPException 400` avec message clair AVANT les essais playlist/track.
+  Utile si quelqu'un POST directement à l'API.
+
+**Upload version → job/SSE + modal de progression**
+
+Avant : `POST /sessions/{id}/versions` attendait 10-30s synchrone (analyze_track)
+sans aucun feedback visible côté UI hors un spinner.
+
+- **`backend/api/job_runner.py`** : nouvelle `run_session_upload_job` async qui
+  appelle `analyze_track` avec `on_step` (mapping `fraction × 100` pour barre
+  smooth) + `on_log`. Cleanup auto du fichier orphelin si erreur ou annulation.
+- **Route POST `/sessions/{id}/versions`** retourne maintenant `JobOut` 202
+  Accepted. Le fichier est sauvé sur disque puis l'analyse tourne dans un thread
+  asyncio. Le client suit via `GET /jobs/{id}/stream` (SSE existant).
+- **`api.ts`** : `uploadSessionVersion` retourne `Job` au lieu de `SessionVersion`.
+- **`SessionUploadModal.svelte`** : stream SSE, ProgressBar avec label de l'étape
+  courante (Tempo, Tonalité, Énergie…), logs en temps réel avec auto-scroll +
+  colorisation (`✓` vert / `→` muted), bouton "Annuler l'analyse" pendant
+  running, bloque le close tant que running, affiche encart vert "✓ vN ajoutée
+  — Fit score : X%" quand done, encart rouge si error.
+
+**Fix critique : boucle infinie $effect Chart.js**
+
+- Symptôme : refresh page session locked = >15 secondes, browser tab spinner
+  permanent, "loader fantôme" sur le bouton import. Backend mesuré à 6.7ms via
+  `time curl /api/sessions/{id}` → bottleneck pas côté serveur.
+- Root cause : `$effect` dans `SessionEvolutionCharts` lisait ET écrivait
+  `fitRef.chart` (un `$state` Svelte 5 réactif). Comme Svelte 5 track les
+  reads, l'écriture re-déclenchait le $effect → boucle infinie de
+  destroy+rebuild Chart.js qui saturait le main thread.
+- Fix : charts stockés dans des **variables non-réactives** (let normales hors
+  `$state`), brisant la boucle. Un seul `$effect` avec deps explicites
+  (`versions.length`, `targetPattern`) + cleanup propre via return function.
+  Bonus : `animation: false` partout pour gain perfs additionnel.
+
+**Script de validation pipeline (CRITIQUE pour la confiance)**
+
+Question d'Adrien : "Si je corrige de +3 dB dans mon DAW, est-ce que la mesure
+suivante reportera bien ~0 dB de delta ? Sinon les chiffres affichés ne valent
+rien." → besoin d'un test qui valide la cohérence mesure → correction → re-mesure
+de la chaîne audio.
+
+- **`backend/cli/validate_pipeline.py`** : prend un MP3/WAV en input + applique
+  10 transforms connus via librosa/scipy (gain ±dB, time-stretch ×1.1, pitch
+  shift ±N demi-tons, low-pass 5kHz, compresseur 4:1 à -20dB, compresseur agressif
+  8:1 à -30dB, boost EQ par bande +12dB sur sub/bass/mid, mode preservation).
+  Sauvegarde des variantes en WAV 32-bit float (évite clipping sur gains
+  positifs). Pour chaque transform, ré-analyse via `analyze_track` réel et
+  compare attendu vs mesuré.
+- **14 checks** dans un tableau ASCII propre : LUFS, true peak, BPM (avec
+  tolérance harmoniques ×2/×0.5/×1.5/×0.75 cohérente avec
+  `bpm_alt_hypotheses`), note shift, mode preservation, centroid, 4 bandes
+  spectrales (high/bass/mid/sub conditionnel), crest, DR.
+- **Couverture** : 12 features sur ~22 mesurées (~55%). 100% des features qui
+  drivent le plan d'action (`action_planner.py` utilise LUFS, crest, DR, BPM,
+  centroid, 4 bandes). Non testé : structure (drop), MFCC, métadata interne
+  tonality, bandes low_mid/high_mid — ces analyzers reposent sur les mêmes libs
+  donc régression silencieuse improbable.
+- **Sortie : `14/14 checks OK` = pipeline cohérent**. Si FAIL → bug analyzer
+  à investiguer AVANT release.
+- **Ajouté à la release checklist** (mémoire
+  `project_beatfinder_release_checklist.md` section 4. Tests) : la commande
+  exacte à lancer avant chaque tag git.
+
+**Apprentissages techniques notables**
+
+- Svelte 5 `$effect` ne doit jamais lire+écrire un même `$state` reactif
+  (boucle infinie). Utiliser des variables non-réactives pour les instances
+  internes (Chart.js, EventSource, etc.) — le `$state` est réservé aux refs
+  DOM (bind:this) et aux valeurs observables par le template.
+- Chart.js : `animation: false` + `interaction.mode='index'` rendent les
+  charts instantanés ET plus user-friendly. À adopter par défaut sur tout
+  chart "data viz" (pas pour les animations marketing).
+- Sticky CSS multi-colonnes : `position: sticky; left: 0` pour la 1ère,
+  `left: <largeur-1ere>px` pour la 2ème. Largeur 1ère doit être `w-[Xpx]`
+  strict (pas `min-w`), sinon désalignement.
+- WAV PCM 16-bit clip silencieusement à 0 dBFS. Pour tests audio précis,
+  passer `subtype="FLOAT"` à `soundfile.write` (WAV 32-bit float, range
+  illimité).
+- Le détecteur BPM peut basculer sur un harmonique cohérent (×0.5/×1.5/×0.75)
+  selon la complexité rythmique du contenu. Comportement géré en prod par
+  `bpm_alt_hypotheses` + modal de correction manuelle. Le script
+  `validate_pipeline` accepte ce comportement (kind `ratio_with_harmonics`)
+  pour ne pas reporter de faux positifs.
+
 ## En attente / non-fait
 
 ### Court terme — à reprendre demain
@@ -339,8 +504,10 @@ alternatives explorées en "Idées long terme — cosmétique macOS" plus bas.
   l'émission ISO 8601 avec `Z` (UTC explicite) via un `field_serializer`
   sur tous les schemas qui exposent une datetime.
 - [ ] **Phase 2 sessions** : étape ambiance dans le wizard (déjà stub),
-  source upload audio + import depuis playlist Beatfinder existante (au
-  lieu de Spotify URL), graph fit_score v1→vN sur la page session locked.
+  source upload audio (au lieu de Spotify URL uniquement) + import depuis
+  playlist Beatfinder existante. **Livré au Sprint 11** : graph fit_score
+  v1→vN (`SessionEvolutionCharts`), comparatif multi-versions
+  (`VersionsRecapTable`), drill-down version (`VersionDetailModal`).
 - [ ] **Tests UI Svelte/Playwright** : pas encore en place. Les modals
   complexes (wizard, correction) bénéficieraient d'un smoke test minimum.
 - [ ] **Multi-hypothèses BPM plus poussé** : actuellement on suggère 4

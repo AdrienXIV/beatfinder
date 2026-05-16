@@ -1,23 +1,40 @@
 <script lang="ts">
 	import { invalidateAll } from '$app/navigation';
 	import type { PageData } from './$types';
-	import { api, ApiError, type TrackMeta } from '$lib/api';
+	import { api, ApiError, type Job, type SessionVersion, type TrackMeta } from '$lib/api';
 	import BriefRenderer from '$lib/components/BriefRenderer.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Card from '$lib/components/Card.svelte';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
+	import SessionEvolutionCharts from '$lib/components/SessionEvolutionCharts.svelte';
+	import SessionUploadModal from '$lib/components/SessionUploadModal.svelte';
 	import TrackCorrectionModal from '$lib/components/TrackCorrectionModal.svelte';
+	import VersionDetailModal from '$lib/components/VersionDetailModal.svelte';
+	import VersionsRecapTable from '$lib/components/VersionsRecapTable.svelte';
 	import { cn, formatDateTime, formatDurationMs, formatNumber } from '$lib/utils';
 
 	let { data }: { data: PageData } = $props();
 	let session = $derived(data.session);
 
 	// ─── État UI ───────────────────────────────────────────────────────
-	let planOpen = $state(true);
+	let planOpen = $state(false);
 	let uploadInput: HTMLInputElement | null = $state(null);
-	let uploading = $state(false);
+	let uploadingFile = $state(false); // pendant upload HTTP (avant que le job démarre)
 	let uploadError = $state<string | null>(null);
+	let uploadJobId = $state<string | null>(null);
+	let uploadModalOpen = $state(false);
+
+	// Drill-down version
+	let detailVersion = $state<SessionVersion | null>(null);
+	let detailOpen = $state(false);
+	function openDetail(v: SessionVersion) {
+		detailVersion = v;
+		detailOpen = true;
+	}
+	function closeDetail() {
+		detailOpen = false;
+	}
 
 	// Modal de correction (réutilisée pour 1 track ou liste)
 	let correctionTrack = $state<TrackMeta | null>(null);
@@ -73,16 +90,26 @@
 		if (!file) return;
 		target.value = '';
 
-		uploading = true;
+		uploadingFile = true;
 		uploadError = null;
 		try {
-			await api.uploadSessionVersion(session.spotify_id, file);
-			await invalidateAll();
+			const job = await api.uploadSessionVersion(session.spotify_id, file);
+			uploadJobId = job.id;
+			uploadModalOpen = true;
 		} catch (e) {
 			uploadError = e instanceof ApiError ? e.detail || e.message : String(e);
 		} finally {
-			uploading = false;
+			uploadingFile = false;
 		}
+	}
+
+	async function onUploadDone(_job: Job) {
+		await invalidateAll();
+	}
+
+	function closeUploadModal() {
+		uploadModalOpen = false;
+		uploadJobId = null;
 	}
 
 	function fitColor(score: number | null): string {
@@ -155,9 +182,9 @@
 				/>
 				<Button
 					variant="primary"
-					loading={uploading}
+					loading={uploadingFile}
 					onclick={() => uploadInput?.click()}
-					disabled={uploading}
+					disabled={uploadingFile || uploadModalOpen}
 				>
 					+ Importer v{session.versions.length + 1}
 				</Button>
@@ -372,9 +399,17 @@
 
 		<!-- Versions -->
 		<section class="mb-8">
-			<h2 class="text-sm font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-3">
-				Versions ({session.versions.length})
-			</h2>
+			<div class="flex items-baseline justify-between mb-3">
+				<h2 class="text-sm font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">
+					Versions ({session.versions.length})
+				</h2>
+				{#if session.versions.length > 0}
+					<span class="text-xs text-[var(--color-fg-muted)]">
+						Clique sur une version pour voir son détail
+					</span>
+				{/if}
+			</div>
+
 			{#if session.versions.length === 0}
 				<Card class="border-dashed">
 					<div class="text-center py-6 text-sm text-[var(--color-fg-muted)]">
@@ -385,11 +420,37 @@
 					</div>
 				</Card>
 			{:else}
+				<!-- Charts d'évolution -->
+				<div class="mb-6">
+					<SessionEvolutionCharts
+						versions={session.versions}
+						targetPattern={session.target_pattern}
+					/>
+				</div>
+
+				<!-- Tableau récap multi-versions -->
+				<div class="mb-6">
+					<h3 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-2">
+						Comparatif feature par feature
+					</h3>
+					<VersionsRecapTable
+						versions={session.versions}
+						targetPattern={session.target_pattern}
+						onVersionClick={openDetail}
+					/>
+				</div>
+
+				<!-- Liste compact des versions (historique) -->
+				<h3 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-2">
+					Historique
+				</h3>
 				<div class="space-y-2">
 					{#each versionsDesc as v (v.id)}
 						{@const isLast = v.version_number === session.versions.length}
-						<div
-							class="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 flex items-center justify-between gap-3"
+						<button
+							type="button"
+							onclick={() => openDetail(v)}
+							class="w-full text-left rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 flex items-center justify-between gap-3 hover:bg-[var(--color-surface-2)] hover:border-[var(--color-fg-muted)] transition-colors cursor-pointer"
 						>
 							<div class="flex items-center gap-3 min-w-0">
 								<Badge variant={isLast ? 'accent' : 'muted'}>{v.name}</Badge>
@@ -397,13 +458,16 @@
 									{formatDateTime(v.created_at)}
 								</span>
 							</div>
-							<div class="flex items-baseline gap-2 shrink-0">
-								<span class="text-xs text-[var(--color-fg-muted)]">fit_score</span>
-								<span class={`font-mono text-lg font-semibold ${fitColor(v.fit_score)}`}>
-									{fitLabel(v.fit_score)}
-								</span>
+							<div class="flex items-baseline gap-3 shrink-0">
+								<div class="flex items-baseline gap-2">
+									<span class="text-xs text-[var(--color-fg-muted)]">fit_score</span>
+									<span class={`font-mono text-lg font-semibold ${fitColor(v.fit_score)}`}>
+										{fitLabel(v.fit_score)}
+									</span>
+								</div>
+								<span class="text-[var(--color-fg-muted)] text-sm">›</span>
 							</div>
-						</div>
+						</button>
 					{/each}
 				</div>
 			{/if}
@@ -432,6 +496,20 @@
 	isOpen={correctionOpen}
 	onClose={closeCorrection}
 	onSaved={onCorrectionSaved}
+/>
+
+<VersionDetailModal
+	version={detailVersion}
+	targetPattern={session.target_pattern}
+	isOpen={detailOpen}
+	onClose={closeDetail}
+/>
+
+<SessionUploadModal
+	jobId={uploadJobId}
+	isOpen={uploadModalOpen}
+	onClose={closeUploadModal}
+	onDone={onUploadDone}
 />
 
 <ConfirmDialog

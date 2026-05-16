@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { api, ApiError, type Job } from '$lib/api';
+	import { detectSpotifyUrl, spotifyTypeLabel } from '$lib/spotify-url';
 	import Badge from './Badge.svelte';
 	import Button from './Button.svelte';
 	import ProgressBar from './ProgressBar.svelte';
@@ -32,6 +33,13 @@
 	function isTrackUrl(u: string): boolean {
 		return /(?:spotify:track:|open\.spotify\.com\/track\/)/i.test(u.trim());
 	}
+
+	const urlInfo = $derived(detectSpotifyUrl(sourceUrl));
+	const urlInputClass = $derived.by(() => {
+		if (!sourceUrl.trim()) return 'border-[var(--color-border)]';
+		if (urlInfo.supported) return 'border-[var(--color-ok)]/50';
+		return 'border-[var(--color-err)]/50';
+	});
 
 	function closeStream() {
 		if (analyzeStream) {
@@ -216,9 +224,47 @@
 					type="url"
 					bind:value={sourceUrl}
 					placeholder="https://open.spotify.com/playlist/… ou /track/…"
-					class="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-bg)] px-3 h-10 text-sm font-mono focus:outline focus:outline-2 focus:outline-[var(--color-accent)]"
+					class="w-full rounded-md border {urlInputClass} bg-[var(--color-bg)] px-3 h-10 text-sm font-mono focus:outline focus:outline-2 focus:outline-[var(--color-accent)]"
 					disabled={creating}
 				/>
+
+				{#if sourceUrl.trim()}
+					<div class="mt-2 text-xs flex items-center gap-2">
+						{#if urlInfo.supported && urlInfo.type !== 'unknown'}
+							<span class="text-[var(--color-ok)]">✓</span>
+							<span class="text-[var(--color-fg)]">
+								<strong>{spotifyTypeLabel(urlInfo.type)}</strong> détecté{urlInfo.type === 'playlist' ? 'e' : ''} —
+								prêt à analyser
+							</span>
+						{:else if urlInfo.supported && urlInfo.type === 'unknown'}
+							<span class="text-[var(--color-warn)]">?</span>
+							<span class="text-[var(--color-fg-muted)]">
+								ID brut détecté — Beatfinder tentera playlist puis track
+							</span>
+						{:else if urlInfo.type !== 'unknown'}
+							<span class="text-[var(--color-err)]">✕</span>
+							<span class="text-[var(--color-err)]">
+								<strong>{spotifyTypeLabel(urlInfo.type)}</strong> non supporté.
+								{#if urlInfo.type === 'album'}
+									Ouvre l'album sur Spotify et copie le lien d'une <strong>track</strong> précise,
+									ou crée une <strong>playlist</strong> contenant ces tracks.
+								{:else if urlInfo.type === 'artist'}
+									Utilise une <strong>track</strong> ou une <strong>playlist</strong> spécifique
+									de l'artiste, pas le profil entier.
+								{:else}
+									Beatfinder n'analyse que les <strong>tracks</strong> et <strong>playlists</strong>.
+								{/if}
+							</span>
+						{:else}
+							<span class="text-[var(--color-err)]">✕</span>
+							<span class="text-[var(--color-err)]">
+								Format URL Spotify non reconnu. Colle un lien
+								<code class="bg-[var(--color-surface-2)] px-1 rounded">open.spotify.com/track/…</code>
+								ou <code class="bg-[var(--color-surface-2)] px-1 rounded">/playlist/…</code>.
+							</span>
+						{/if}
+					</div>
+				{/if}
 			{:else if step === 2}
 				<h3 class="text-sm font-semibold mb-2">Confirmer la création</h3>
 				<p class="text-sm text-[var(--color-fg-muted)] mb-4 leading-relaxed">
@@ -299,7 +345,7 @@
 				<Button
 					variant="primary"
 					size="sm"
-					disabled={!sourceUrl.trim() || creating}
+					disabled={!sourceUrl.trim() || !urlInfo.supported || creating}
 					onclick={() => (step = 2)}
 				>
 					Suivant →

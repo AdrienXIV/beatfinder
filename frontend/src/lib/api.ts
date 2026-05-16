@@ -631,7 +631,7 @@ export const api = {
 	uploadSessionVersion: (sessionId: string, file: File, f?: typeof fetch) => {
 		const fd = new FormData();
 		fd.append('file', file);
-		return multipartRequest<SessionVersion>(
+		return multipartRequest<Job>(
 			`/sessions/${encodeURIComponent(sessionId)}/versions`,
 			fd,
 			f
@@ -662,6 +662,8 @@ export type SessionVersion = {
 	version_number: number;
 	name: string;
 	fit_score: number | null;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	features_json: Record<string, any>;
 	created_at: string;
 };
 

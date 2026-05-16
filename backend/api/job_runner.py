@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
+from typing import Any
 
 from backend.api.jobs import JobQueue
 from backend.api.schemas import AnalyzeRequest, AnalyzeTrackRequest
@@ -145,3 +147,115 @@ async def run_track_analyze_job(
         "artist": result.get("artist"),
         "duration_ms": result.get("duration_ms"),
     })
+
+
+def _run_session_version_sync(
+    session_spotify_id: str,
+    audio_path: Path,
+    version_number: int,
+    on_step,  # noqa: ANN001 — StepCallback
+    on_log,  # noqa: ANN001 — LogCallback
+) -> dict[str, Any]:
+    """Analyse audio + persistance SessionVersion. Tourne dans un thread."""
+    from sqlalchemy import select
+
+    from backend.analyzers import analyze_track
+    from backend.db import init_db, make_session_factory
+    from backend.domain.models import CreativeSession, SessionVersion
+    from backend.report_generator._analytics import _fit_score
+
+    features = analyze_track(audio_path, on_step=on_step, on_log=on_log)
+
+    engine = init_db()
+    SessionFactory = make_session_factory(engine)
+    with SessionFactory() as db:
+        sess = db.scalar(
+            select(CreativeSession).where(
+                CreativeSession.spotify_id == session_spotify_id,
+            ),
+        )
+        if sess is None:
+            raise RuntimeError(
+                f"Session {session_spotify_id!r} disparue pendant l'analyse",
+            )
+        if not sess.is_locked:
+            raise RuntimeError(
+                f"Session {session_spotify_id!r} déverrouillée pendant l'analyse",
+            )
+
+        fit = _fit_score(features, sess.target_pattern_json)
+
+        version = SessionVersion(
+            session_id=sess.id,
+            version_number=version_number,
+            name=f"v{version_number}",
+            audio_path=str(audio_path),
+            features_json=features,
+            fit_score=fit,
+        )
+        db.add(version)
+        db.commit()
+        db.refresh(version)
+
+        return {
+            "session_spotify_id": session_spotify_id,
+            "version_id": version.id,
+            "version_number": version_number,
+            "fit_score": fit,
+        }
+
+
+async def run_session_upload_job(
+    queue: JobQueue,
+    job_id: str,
+    session_spotify_id: str,
+    audio_path: Path,
+    version_number: int,
+) -> None:
+    """Analyse une version uploadée et la persiste en SessionVersion.
+
+    Reporte progression et logs via la queue. Si l'analyse échoue, le fichier
+    audio orphelin est supprimé du disque.
+    """
+    queue.mark_running(job_id)
+    queue.log(
+        job_id,
+        f"Analyse v{version_number} : {audio_path.name} "
+        f"({audio_path.stat().st_size / (1024 * 1024):.1f} MB)",
+    )
+
+    # analyze_track émet on_step(key, label, fraction) avec fraction ∈ [0, 1].
+    # On mappe sur la barre de progression (total = 100 pour smooth %).
+    def on_step(key: str, label: str, fraction: float) -> None:
+        queue.set_progress(job_id, round(fraction * 100, 1), 100, label)
+
+    def on_log(line: str) -> None:
+        queue.log(job_id, line)
+
+    try:
+        result = await asyncio.to_thread(
+            _run_session_version_sync,
+            session_spotify_id,
+            audio_path,
+            version_number,
+            on_step,
+            on_log,
+        )
+    except asyncio.CancelledError:
+        queue.log(job_id, "Annulé par utilisateur.")
+        audio_path.unlink(missing_ok=True)
+        raise
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Session upload job %s failed", job_id)
+        audio_path.unlink(missing_ok=True)
+        queue.mark_error(job_id, f"{type(exc).__name__}: {exc}")
+        return
+
+    queue.log(
+        job_id,
+        f"✓ v{version_number} analysée — fit_score = "
+        f"{result['fit_score'] * 100:.0f}%"
+        if result.get("fit_score") is not None
+        else f"✓ v{version_number} analysée",
+    )
+    queue.mark_done(job_id, result)

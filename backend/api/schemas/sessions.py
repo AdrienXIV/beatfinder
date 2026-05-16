@@ -29,6 +29,7 @@ class SessionVersionOut(BaseModel):
     version_number: int
     name: str
     fit_score: float | None = None
+    features_json: dict
     created_at: datetime
 
 

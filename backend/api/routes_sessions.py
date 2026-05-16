@@ -12,7 +12,9 @@ scratch en suivant une cible d'inspiration figée. Chaque version uploadée
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import re
 import shutil
 import uuid
 from datetime import UTC, datetime
@@ -23,12 +25,14 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from backend.analyzers import analyze_track
-from backend.api.deps import get_data_dir, get_session
+from backend.api.deps import get_data_dir, get_job_queue, get_session
+from backend.api.job_runner import run_session_upload_job
+from backend.api.jobs import JobQueue
 from backend.api.schemas import (
     CreateSessionIn,
     CreativeSessionDetailOut,
     CreativeSessionSummaryOut,
+    JobOut,
     SessionVersionOut,
     TrackOut,
 )
@@ -37,13 +41,11 @@ from backend.domain.models import (
     Playlist,
     PlaylistPattern,
     PlaylistTrack,
-    SessionVersion,
     Track,
     TrackAnalysis,
     TrackOverride,
 )
 from backend.infrastructure.spotify_client import SpotifyClient
-from backend.report_generator._analytics import _fit_score
 from backend.services.session_brief import generate_session_brief
 from backend.services.track_overrides import (
     apply_overrides,
@@ -58,8 +60,29 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
 DataDirDep = Annotated[Path, Depends(get_data_dir)]
+QueueDep = Annotated[JobQueue, Depends(get_job_queue)]
 
 ALLOWED_AUDIO_EXTENSIONS = frozenset({".wav", ".mp3", ".flac", ".ogg", ".m4a", ".aiff"})
+
+# Spotify expose plusieurs types de ressources mais Beatfinder n'analyse que
+# tracks et playlists. On bloque les autres avec un 400 explicite plutôt que
+# de laisser tomber sur le 404 générique "introuvable en DB".
+UNSUPPORTED_SPOTIFY_TYPE_RE = re.compile(
+    r"(?:spotify:|open\.spotify\.com/)(album|artist|show|episode)[:/]",
+    re.IGNORECASE,
+)
+UNSUPPORTED_TYPE_HINTS = {
+    "album": (
+        "Ouvre l'album sur Spotify et copie le lien d'une track précise, "
+        "ou crée une playlist contenant ces tracks."
+    ),
+    "artist": (
+        "Utilise une track ou une playlist spécifique de l'artiste, "
+        "pas le profil entier."
+    ),
+    "show": "Les podcasts ne sont pas analysables musicalement.",
+    "episode": "Les podcasts ne sont pas analysables musicalement.",
+}
 
 
 def _to_summary(s: CreativeSession) -> CreativeSessionSummaryOut:
@@ -224,7 +247,8 @@ def _resolve_source(
     """Résout une URL/ID Spotify en (target_kind, target_ref, target_name, pattern).
 
     Tente successivement : URL playlist → URL track → ID brut.
-    Lève 404 si pas trouvé en DB, 409 si trouvé mais pas encore analysé.
+    Lève 400 si type Spotify non supporté (album/artist/show/episode),
+    404 si pas trouvé en DB, 409 si trouvé mais pas encore analysé.
 
     **Régénère le pattern** de la cible avant snapshot — garantit que la
     session est créée sur la version la plus fraîche (avec overrides appliqués).
@@ -232,6 +256,19 @@ def _resolve_source(
     bouge plus, même si la playlist est ré-analysée ou si ses overrides
     changent après coup.
     """
+    # 0. Rejet explicite des types Spotify non supportés (album/artist/...)
+    unsupported_match = UNSUPPORTED_SPOTIFY_TYPE_RE.search(source_url)
+    if unsupported_match:
+        kind = unsupported_match.group(1).lower()
+        hint = UNSUPPORTED_TYPE_HINTS.get(kind, "")
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Type Spotify {kind!r} non supporté. Beatfinder n'analyse que "
+                f"les tracks et playlists. {hint}".strip()
+            ),
+        )
+
     # 1. Essai URL playlist
     try:
         playlist_id = SpotifyClient.parse_playlist_id(source_url)
@@ -385,15 +422,21 @@ def get_session_detail(
 
 
 @router.post(
-    "/{spotify_id}/versions", response_model=SessionVersionOut,
+    "/{spotify_id}/versions", response_model=JobOut, status_code=202,
 )
 async def upload_version(
     spotify_id: str,
     db: SessionDep,
     data_dir: DataDirDep,
+    queue: QueueDep,
     file: UploadFile = File(...),
-) -> SessionVersionOut:
-    """Upload une version audio, analyse, calcule fit_score.
+) -> JobOut:
+    """Upload une version audio + crée un job d'analyse asynchrone.
+
+    Le fichier est sauvé sur disque puis l'analyse (longue : 10-30s) tourne
+    dans un thread. La route retourne immédiatement un JobOut 202 ; le client
+    suit la progression via `GET /jobs/{id}/stream` (SSE) puis re-fetch la
+    session quand `status=done`.
 
     Chaque version a son propre features_json — pas de moyennage avec les
     précédentes. Le fit_score mesure la convergence vers la cible figée.
@@ -434,29 +477,13 @@ async def upload_version(
     content = await file.read()
     audio_path.write_bytes(content)
 
-    try:
-        features = analyze_track(audio_path)
-    except Exception as exc:
-        audio_path.unlink(missing_ok=True)
-        log.exception("Échec analyse %s", audio_path)
-        raise HTTPException(
-            status_code=500, detail=f"Échec analyse audio : {exc}",
-        ) from exc
-
-    fit = _fit_score(features, sess.target_pattern_json)
-
-    version = SessionVersion(
-        session_id=sess.id,
-        version_number=next_n,
-        name=f"v{next_n}",
-        audio_path=str(audio_path),
-        features_json=features,
-        fit_score=fit,
+    job = queue.create("session-version-upload")
+    task = asyncio.create_task(
+        run_session_upload_job(queue, job.id, spotify_id, audio_path, next_n),
+        name=f"session-upload:{job.id}",
     )
-    db.add(version)
-    db.commit()
-    db.refresh(version)
-    return SessionVersionOut.model_validate(version)
+    queue.attach_task(job.id, task)
+    return JobOut(**job.to_dict())
 
 
 def _regenerate_target_pattern(
