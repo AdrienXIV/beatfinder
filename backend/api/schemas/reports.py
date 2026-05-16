@@ -1,16 +1,16 @@
 """Schemas briefs markdown + compare playlists + multi-compare."""
 from __future__ import annotations
 
-from datetime import datetime
-
 from pydantic import BaseModel
+
+from ._datetime import UtcDatetime
 
 
 class BriefOut(BaseModel):
     spotify_id: str
     playlist_name: str
     markdown: str
-    generated_at: datetime
+    generated_at: UtcDatetime
     cached: bool
 
 
@@ -29,7 +29,7 @@ class CompareOut(BaseModel):
     n_tracks_a: int
     n_tracks_b: int
     markdown: str
-    generated_at: datetime
+    generated_at: UtcDatetime
 
 
 class MultiCompareSourceOut(BaseModel):

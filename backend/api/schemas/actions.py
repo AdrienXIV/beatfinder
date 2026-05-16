@@ -1,9 +1,9 @@
 """Schemas plan d'action (killer feature)."""
 from __future__ import annotations
 
-from datetime import datetime
-
 from pydantic import BaseModel
+
+from ._datetime import UtcDatetime
 
 
 class ActionItemOut(BaseModel):
@@ -32,7 +32,7 @@ class ActionPlanOut(BaseModel):
     from_bands: dict[str, float] = {}
     to_bands: dict[str, float] = {}
     items: list[ActionItemOut]
-    generated_at: datetime
+    generated_at: UtcDatetime
     cached: bool
 
 
@@ -41,7 +41,7 @@ class ComparedTargetOut(BaseModel):
     target_name: str
     target_n_tracks: int
     n_items: int
-    generated_at: datetime
+    generated_at: UtcDatetime
 
 
 class ComparedSourceOut(BaseModel):

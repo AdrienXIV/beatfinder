@@ -1,11 +1,11 @@
 """Schemas pour les sessions créatives (CreativeSession + SessionVersion)."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from ._datetime import UtcDatetime
 from .playlists import TrackOut
 
 TargetKind = Literal["spotify_playlist", "spotify_track", "upload", "local_playlist"]
@@ -30,7 +30,7 @@ class SessionVersionOut(BaseModel):
     name: str
     fit_score: float | None = None
     features_json: dict
-    created_at: datetime
+    created_at: UtcDatetime
 
 
 class CreativeSessionSummaryOut(BaseModel):
@@ -45,8 +45,8 @@ class CreativeSessionSummaryOut(BaseModel):
     n_versions: int
     last_fit_score: float | None = None
     is_locked: bool = False
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
 
 
 class CreativeSessionDetailOut(BaseModel):
@@ -68,6 +68,6 @@ class CreativeSessionDetailOut(BaseModel):
     plan_md: str
     versions: list[SessionVersionOut]
     is_locked: bool = False
-    locked_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
+    locked_at: UtcDatetime | None = None
+    created_at: UtcDatetime
+    updated_at: UtcDatetime

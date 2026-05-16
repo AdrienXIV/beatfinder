@@ -1,10 +1,11 @@
 """Schemas pour la JobQueue + déclencheur d'analyse playlist."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from ._datetime import UtcDatetime
 
 
 class JobProgressOut(BaseModel):
@@ -22,8 +23,8 @@ class JobOut(BaseModel):
     result: dict[str, Any] | None = None
     error: str | None = None
     revision: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
 
 
 class AnalyzeRequest(BaseModel):

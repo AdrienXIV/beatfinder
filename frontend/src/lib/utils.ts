@@ -6,11 +6,10 @@ export function cn(...classes: (string | undefined | false | null)[]): string {
  * Parse une string ISO 8601 en Date. Si l'ISO n'a pas de timezone marker
  * (Z, +HH:MM ou -HH:MM), on assume **UTC** au lieu de l'heure locale.
  *
- * Workaround pour le bug récurrent backend : SQLite/SQLAlchemy stocke les
- * `datetime.now(UTC)` comme strings naïves (sans tz). Pydantic les sérialise
- * sans suffixe → `new Date()` les interprète comme heure locale et affiche
- * 2h en retard en France (UTC+2 été). Tant que le backend ne forçera pas
- * la tz à la sérialisation, ce helper compense côté frontend.
+ * Depuis Sprint 11, le backend force l'émission avec 'Z' via le type
+ * Pydantic `UtcDatetime` (cf. `backend/api/schemas/_datetime.py`). Ce helper
+ * reste comme défense en profondeur pour : datetimes lus depuis localStorage
+ * (anciens caches), data externes, edge cases pre-Sprint 11.
  */
 function parseIsoAsUtc(iso: string): Date {
 	const hasTz = /[Zz]|[+-]\d{2}:?\d{2}$/.test(iso);
