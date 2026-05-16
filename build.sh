@@ -32,7 +32,12 @@ cd "$ROOT"
 echo "→ build binaire PyInstaller (beatfinder.spec, low priority)"
 # nice/ionice : PyInstaller pic à 3-5 GB RAM pendant l'analyse + collect des libs
 # scientifiques. Sans ça, l'UI freeze sur les machines à faible RAM (16 GB et moins).
-nice -n 19 ionice -c3 "$VENV/bin/pyinstaller" beatfinder.spec --clean --noconfirm
+# ionice est Linux-only — sur macOS on garde juste nice (cf. v2.1.4 / Mac Quentin).
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  nice -n 19 "$VENV/bin/pyinstaller" beatfinder.spec --clean --noconfirm
+else
+  nice -n 19 ionice -c3 "$VENV/bin/pyinstaller" beatfinder.spec --clean --noconfirm
+fi
 
 EXE="$ROOT/dist/beatfinder/beatfinder"
 if [[ -x "$EXE" ]]; then

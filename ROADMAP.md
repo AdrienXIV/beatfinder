@@ -1,16 +1,23 @@
 # Beatfinder — Roadmap
 
-État actuel : **V2.1.0 — sessions guidées + corrections track + auto-update**.
-Repo passé public sur `github.com/AdrienXIV/beatfinder` (all rights reserved
-sans LICENSE). Banner UI auto-détecte les nouvelles releases GitHub. Sessions
-de production avec wizard 3 étapes (cible → ambiance → analyse) et état
-draft/locked pour figer la référence. Modal de correction BPM/Key sur les
-tracks incertaines avec propagation automatique aux playlists et sessions
-actives. Migrations DB rétrocompatibles via `PENDING_COLUMN_MIGRATIONS` au
-boot (zéro Alembic).
+État actuel : **V2.1.4 — dock click macOS définitivement fixé**.
+Combo `LSMultipleInstancesProhibited` (Info.plist) + `NSApplicationDelegate`
+pyobjc qui capte l'event `applicationShouldHandleReopen` au clic Dock et
+focus la fenêtre Chrome `--app` via PID isolé (osascript ciblé, pas le
+bundle Google Chrome qui spawnerait une page d'accueil). Validé empiriquement
+sur Mac de Quentin le 2026-05-16 : 18 events captés successivement, focus
+visuel confirmé. Cosmétique restante : Chrome.app reste affiché au Dock en
+parallèle de Beatfinder.app (pistes documentées en idées long terme).
 
-État précédent : V2.0.14 — distribution cross-platform livrée (CI GitHub
-Actions actif, 3 binaires natifs Linux/Mac/Windows, validation user Quentin).
+État précédent : V2.1.0 — sessions guidées + corrections track + auto-update.
+Repo public sur `github.com/AdrienXIV/beatfinder` (all rights reserved sans
+LICENSE). Banner UI auto-détecte les nouvelles releases GitHub. Wizard 3
+étapes (cible → ambiance → analyse) + état draft/locked. Modal de correction
+BPM/Key avec propagation playlists/sessions. Migrations DB rétrocompatibles
+via `PENDING_COLUMN_MIGRATIONS` au boot.
+
+État archivé : V2.0.14 — distribution cross-platform (CI GitHub Actions
+actif, 3 binaires natifs Linux/Mac/Windows).
 
 ## Sprints livrés
 
@@ -229,6 +236,95 @@ Grosse session de 7 livrables coordonnés :
 **Release checklist durcie**
 - Mémoire `project_beatfinder_release_checklist.md` mise à jour avec règle critique : `pyproject.toml` version DOIT == tag git (sans préfixe `v`). Précédent : v2.0.14 taggé alors que pyproject était à 1.7.0 → désynchro découverte au prochain bump et corrigée
 
+### Sprint 10 — V2.1.1 → V2.1.4 dock click macOS (2026-05-15 → 2026-05-16)
+
+Bug originel (V2.1.0, "Single-instance guard macOS" du Sprint 9) : sur
+macOS, clic sur l'icône Dock d'une instance Beatfinder déjà lancée spawnait
+Chrome.app perso (page Google par défaut) au lieu de raise la fenêtre Chrome
+`--app`. Le `_focus_existing_window` initial faisait `osascript "tell
+application Google Chrome to activate"` → activait le bundle entier qui
+spawne une fenêtre par défaut si Chrome perso n'avait aucune fenêtre visible.
+4 itérations pour converger vers le bon fix :
+
+- **V2.1.1** (7f1e9a8) — versions désynchro entre FastAPI / CFBundle / print
+  PDF. Refactor `__version__` en lecture dynamique via `_resolve_version()`
+  cascade (`importlib.metadata` → `sys._MEIPASS/pyproject.toml` →
+  repo `pyproject.toml` → fallback `"0.0.0"`). Source unique = `[project].version`.
+  Pas directement lié au bug dock mais débloque les diagnostics post-build.
+
+- **DMG uninstall_macos** (73aa758) — `scripts/uninstall_macos.command`
+  pour pouvoir réinstaller proprement entre deux tests (purge
+  `/Applications/Beatfinder.app` + `~/.beatfinder/` optionnel). Utile pour
+  itérer sur le bug.
+
+- **V2.1.2** (385fc62) — première vraie tentative dock click. `_focus_existing_window`
+  passe à `tell System Events to set frontmost of (first process whose unix
+  id is X)` (cible un PID Chrome via `pgrep -f profile_dir`), au lieu de
+  `tell application "Google Chrome"` qui activait le bundle entier. Capture
+  stderr osascript pour logger les refus TCC qui étaient silencieux.
+  Insuffisant car LSMultipleInstancesProhibited absent → re-spawn du binaire
+  au clic Dock par Launch Services au lieu d'event reopen, donc le code
+  fix-focus tournait dans un sous-process fraîchement lancé sans contexte
+  Cocoa.
+
+- **V2.1.3** (83b889f) — `LSMultipleInstancesProhibited=true` + `NSAppleEventsUsageDescription`
+  dans l'Info.plist (CI workflow injecte ces clés au build). Bloque le
+  re-spawn par Launch Services. Mais le process Python n'a aucun event
+  loop Cocoa → l'event `applicationShouldHandleReopen` envoyé par macOS
+  est silencieusement perdu. Bug persiste sous une forme différente
+  (parfois rien ne se passe, parfois macOS fait un fallback re-spawn par
+  ricochet).
+
+- **V2.1.4** (08b9bc2) — **`NSApplicationDelegate` via pyobjc** dans
+  `_main_macos_with_appkit()`. `NSApplication.sharedApplication()` tourne
+  sur main thread, uvicorn dans un thread daemon, `_BeatfinderDelegate(NSObject)`
+  implémente `applicationShouldHandleReopen_hasVisibleWindows_` → loggue et
+  appelle `_focus_existing_window`, retourne `False` pour empêcher le default
+  Cocoa qui réveillait Chrome.app. `_can_use_appkit()` gate sur `sys.platform
+  == "darwin"` + import test pyobjc, fallback `_main_default()` ailleurs.
+  Hiddenimports `objc / AppKit / Foundation / PyObjCTools` ajoutés dans
+  `beatfinder.spec`.
+
+**Validation empirique sur Mac Quentin (2026-05-16)** :
+- `.app` v2.1.3 installé en `/Applications` était une fausse piste pendant
+  toute la première heure de debug — le code `_main_macos_with_appkit` du
+  source v2.1.4 ne tournait pas. Diagnostic : `grep CFBundleShortVersionString`
+  sur l'Info.plist installé → 2.1.3, alors que `pyproject.toml` source = 2.1.4.
+- Rebuild local via `./build.command` + replace `/Applications/Beatfinder.app`.
+- Test propre via `open --stdout=/tmp/bf-debug.log --stderr=/tmp/bf-debug.log
+  /Applications/Beatfinder.app` (Launch Services full + capture stdio — flag
+  `--stdout`/`--stderr` peu connu de `open(1)`).
+- 18 events `Dock click reopen reçu (has_visible=False) — focus fenêtre
+  Chrome` captés au clic Dock, suivis chacun de `Focused existing Beatfinder
+  Chrome process (PID 20143)`. Adrien confirme visuellement : la fenêtre
+  Beatfinder remonte à chaque clic Dock, Chrome ne spawne plus de New Tab.
+
+**Pourquoi `set frontmost of process whose unix id is X` marche au final** :
+contrairement à ma crainte initiale, System Events fait bien la distinction
+entre les process Chrome quand on cible explicitement un PID isolé.
+`tell application "Google Chrome" to activate` (par bundle name) reste piégé
+— mais `tell System Events to set frontmost of (first process whose unix id
+is X)` est précis.
+
+**Limitation cosmétique découverte** : Google Chrome.app reste visible au
+Dock à côté de Beatfinder.app pendant que l'app tourne, car le binaire
+`Google Chrome --app` reste rattaché au `CFBundleIdentifier`
+`com.google.Chrome`. `--user-data-dir` et `--class` n'isolent que côté
+X11/Wayland (Linux), pas macOS qui regroupe par bundle ID au Dock. Pistes
+alternatives explorées en "Idées long terme — cosmétique macOS" plus bas.
+
+**Build chain macOS améliorée en parallèle** :
+- `build.sh` patché : `ionice` est Linux-only et faisait planter
+  `./build.command` immédiatement (`nice: ionice: No such file or directory`).
+  Skip si `$OSTYPE == darwin*` → `nice -n 19` seul.
+- `packaging/Beatfinder.icns` reste gitignored exprès (cf. `.gitignore`
+  ligne `/packaging/Beatfinder.icns`). Sur Mac dev, doit être généré
+  localement avant build (cf. `.github/workflows/build.yml` lignes 89-109
+  pour la procédure : `pip install pillow && python scripts/gen_icon.py`
+  → puis `sips` + `iconutil` sur l'iconset). Workaround temporaire pour
+  cette session : copie depuis le `.app` v2.1.3 préexistant. À factoriser
+  en helper script (cf. Court terme).
+
 ## En attente / non-fait
 
 ### Court terme — à reprendre demain
@@ -251,6 +347,27 @@ Grosse session de 7 livrables coordonnés :
   alternatives ×2/2/×1.5/1.5. À enrichir avec calcul de probabilité par
   hypothèse (autocorrelation onset enveloppe) pour proposer l'hypothèse
   la plus probable en premier.
+- [ ] **Build chain macOS robustifier** (`./build.command` reproductible
+  sur Mac vierge). Suites au Sprint 10 :
+   1. **Auto-gen `packaging/Beatfinder.icns`** quand absent : actuellement
+      gitignored (cf. `.gitignore`), fait planter PyInstaller au
+      step BUNDLE (`FileNotFoundError: Icon input file ... not found`).
+      Factoriser un step dans `build.sh` qui détecte l'absence sur
+      darwin et exécute la procédure du workflow CI (cf.
+      `.github/workflows/build.yml` lignes 89-109) : `.venv/bin/pip
+      install pillow` (Pillow n'est pas dans `requirements.txt`) →
+      `python scripts/gen_icon.py` → `sips -z N N ... && iconutil -c
+      icns Beatfinder.iconset -o packaging/Beatfinder.icns`. Idéalement
+      via `scripts/gen_icns_mac.sh` réutilisable.
+   2. **Pyinstaller dans `requirements-dev.txt`** : actuellement
+      `build.sh` check sa présence mais ne l'installe pas. À
+      ajouter en dev requirement explicite (peut-être déjà dans
+      requirements mais pas dans le venv local de Quentin).
+   3. **Détection Mac Quentin vs Adrien Linux** : `gen_icon.py` est
+      cross-platform OK (Pillow only). `iconutil` est macOS-only,
+      donc le step icns reste dans la branche darwin.
+   Coût estimé : 30 min - 1h. Pas bloquant tant qu'on accepte le
+   workaround manuel (copier l'icns d'une install précédente).
 
 ### Moyen terme (V1.9 / V2 validation)
 
@@ -266,6 +383,32 @@ Grosse session de 7 livrables coordonnés :
 - [ ] **Monétisation** : si l'app sort du cadre perso. Plans : licence one-time Stripe (~15-25€), freemium cloud sync, open-source GPL + Patreon. Hors-code à 90% (legal, business, support, marketing).
 - [ ] **Onboarding macOS/Windows** : actuellement le wizard onboarding marche pour Linux/Spotify. À tester sur les autres plateformes une fois le CI cross-platform actif et un user non-Linux.
 - [ ] **Code signing macOS + Windows** : pour éviter SmartScreen / Gatekeeper warnings. Apple Developer ~100€/an + cert Windows ~250€/an. Required si distribution publique.
+- [ ] **Faire disparaître l'icône Google Chrome.app du Dock** quand
+  Beatfinder tourne sur macOS (cosmétique pure, bug fonctionnel fixé en
+  V2.1.4). 4 pistes par ordre de coût croissant :
+   1. **Clone runtime de Chrome.app** vers
+      `~/.beatfinder/Beatfinder-Browser.app` avec `CFBundleIdentifier`
+      modifié à `com.adrienmaillard.beatfinder.browser`. macOS regroupe
+      par bundle ID au Dock → icône Dock séparée et nommable
+      "Beatfinder". Setup : copier `Google Chrome.app` au premier launch,
+      patcher Info.plist (`/usr/libexec/PlistBuddy -c "Set
+      :CFBundleIdentifier ..."`), lancer le binaire du clone. Hack
+      fragile (à refaire à chaque update Chrome système), +~250 MB
+      disque utilisateur, mais zéro changement de stack côté UI.
+   2. **Bundler Chromium standalone via PyInstaller** : embedded
+      Chromium dans le `.app` Beatfinder (download au build CI depuis
+      les artefacts Chromium publics). Bundle ID propre dès le départ.
+      +~150 MB taille `.app`. Maintenance : suivre les security
+      patches Chromium manuellement ou freezer la version.
+   3. **Migrer vers `pywebview` / `wkwebview` natif macOS** : utilise
+      le moteur WebKit système. Plus de dépendance Chrome ni Chromium.
+      Refonte UI rendering — vérifier compat Chart.js 4 + SvelteKit
+      static export (les `<canvas>` 2D devraient passer, WebGL plus
+      risqué). Convergence partielle avec la piste Tauri.
+   4. **Accepter les 2 icônes Dock** (choix actuel par défaut). Pattern
+      identique à Postman / VS Code / beaucoup d'apps Electron-style
+      qui montrent Chromium / Helper / leur propre icône en parallèle.
+      Zéro effort, cosmétique mineur.
 
 ## Limitations connues
 
@@ -281,3 +424,4 @@ Grosse session de 7 livrables coordonnés :
 - **Tauri Linux** : bloqué sur Ubuntu 20.04 par conflit PPA libxml2-dev vs PPA externe sury (PHP). Workaround = Ubuntu 22.04+, Fedora, ou downgrade libxml2 (risque casser PHP).
 - **ML classifier** : 74% CV accuracy avec seulement 2 classes (rap-fr / rap-us). Améliorable en analysant plus de playlists de styles distincts (drill, lo-fi, trap).
 - **Export .adg Ableton** : expérimental. Le XML respecte la structure publique connue mais sans test dans Live, validation incertaine. Le markdown reste le fallback fiable.
+- **macOS : Google Chrome.app cohabite au Dock avec Beatfinder.app** quand l'app tourne, car `--app=URL` ne change pas le `CFBundleIdentifier` du process. Inhérent à macOS (regroupement Dock par bundle ID). Bug fonctionnel fixé en V2.1.4 (clic Dock Beatfinder = focus Beatfinder), reste un détail visuel. Pistes en idées long terme.
