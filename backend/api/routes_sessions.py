@@ -167,7 +167,9 @@ def _build_target_tracks(db: Session, target_ref: str) -> list[TrackOut] | None:
                 is_overridden=override is not None,
                 confidence_low=confidence_low,
                 confidence_reasons=confidence_reasons,
-                bpm_alt_hypotheses=bpm_alt_hypotheses(tempo.get("bpm")),
+                bpm_alt_hypotheses=bpm_alt_hypotheses(
+                    tempo.get("bpm"), tempo.get("bpm_hypothesis_scores"),
+                ),
             ),
         )
     return out

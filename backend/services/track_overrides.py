@@ -264,11 +264,21 @@ def compute_confidence(features: dict) -> tuple[bool, list[str]]:
     return len(reasons) > 0, reasons
 
 
-def bpm_alt_hypotheses(bpm: float | None) -> list[float]:
+def bpm_alt_hypotheses(
+    bpm: float | None,
+    scores: dict | None = None,
+) -> list[float]:
     """Retourne 4 alternatives musicalement plausibles : ×2, /2, ×1.5, /1.5.
 
     Ne garde que celles qui tombent dans la zone [50, 200] BPM (musical).
-    Trié croissant. Sans doublon.
+    Sans doublon.
+
+    Si `scores` (`features.tempo.bpm_hypothesis_scores`) est fourni, trie par
+    probabilité **décroissante** (autocorr de l'onset envelope au lag de chaque
+    candidat). La plus probable en premier. Sinon, tri croissant par valeur.
+
+    Le tri par score permet à la modal de correction de proposer en premier
+    l'hypothèse la plus susceptible d'être le vrai tempo musical.
     """
     if bpm is None or bpm <= 0:
         return []
@@ -279,4 +289,12 @@ def bpm_alt_hypotheses(bpm: float | None) -> list[float]:
         round(bpm / 1.5, 1),
     }
     candidates.discard(round(bpm, 1))
-    return sorted(c for c in candidates if 50.0 <= c <= 200.0)
+    alts = [c for c in candidates if 50.0 <= c <= 200.0]
+    if scores:
+        # Les clés du dict peuvent être int ou float selon désérialisation JSON
+        # (JSON object keys = strings). On normalise en float pour le lookup.
+        norm = {float(k): float(v) for k, v in scores.items()}
+        alts.sort(key=lambda c: norm.get(c, 0.0), reverse=True)
+    else:
+        alts.sort()
+    return alts

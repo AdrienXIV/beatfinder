@@ -12,7 +12,7 @@ Features :
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Final
 
 import librosa
@@ -34,6 +34,11 @@ class TempoFeatures:
     beat_consistency: float      # 0..1, 1 = tempo très stable
     onset_density: float         # onsets / seconde
     swing_ratio: float | None    # None si pas assez d'onsets
+    # Score [0, 1] par hypothèse BPM via autocorrelation de l'onset envelope.
+    # Clés = BPM arrondi (×1, ×2, ÷2, ×1.5, ÷1.5 si dans [50,200]).
+    # Permet à la modal de correction de proposer l'hypothèse la plus
+    # probable en premier (au lieu d'un ordre arbitraire).
+    bpm_hypothesis_scores: dict[float, float] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -48,6 +53,52 @@ def _correct_octave(bpm: float) -> float:
     while bpm > OCTAVE_HIGH:
         bpm /= 2.0
     return bpm
+
+
+def _score_bpm_hypotheses(
+    onset_env: np.ndarray, sr: int, hop_length: int, base_bpm: float,
+) -> dict[float, float]:
+    """Score chaque hypothèse BPM via l'autocorrelation de l'onset envelope.
+
+    Le pic d'autocorr au lag `60/BPM secondes` mesure la périodicité de
+    l'enveloppe d'onset à ce tempo. Plus haut = plus probable que ce soit
+    le vrai tempo musical.
+
+    Returns: {BPM arrondi → score [0, 1]} avec scores normalisés par le pic
+    max de l'autocorrelation dans la plage musicale [50, 200] BPM.
+    """
+    if onset_env is None or len(onset_env) < 100 or base_bpm <= 0:
+        return {}
+
+    # Autocorrelation jusqu'à un lag correspondant à 30 BPM (~2s)
+    max_lag_s = 60.0 / 30.0
+    max_lag_frames = int(max_lag_s * sr / hop_length)
+    if max_lag_frames < 10 or max_lag_frames > len(onset_env) // 2:
+        max_lag_frames = len(onset_env) // 2
+
+    autocorr = librosa.autocorrelate(onset_env, max_size=max_lag_frames)
+    if len(autocorr) == 0:
+        return {}
+
+    # Plage musicale pour la normalisation : [50, 200] BPM
+    lag_min = max(1, int(60.0 / 200.0 * sr / hop_length))
+    lag_max = min(int(60.0 / 50.0 * sr / hop_length), len(autocorr) - 1)
+    if lag_min >= lag_max:
+        return {}
+
+    max_ac = float(np.max(autocorr[lag_min:lag_max + 1]))
+    if max_ac <= 0:
+        return {}
+
+    candidates = [base_bpm, base_bpm * 2.0, base_bpm / 2.0, base_bpm * 1.5, base_bpm / 1.5]
+    scores: dict[float, float] = {}
+    for cand in candidates:
+        if not (50.0 <= cand <= 200.0):
+            continue
+        lag = int(round(60.0 / cand * sr / hop_length))
+        if 0 < lag < len(autocorr):
+            scores[round(cand, 1)] = round(float(autocorr[lag]) / max_ac, 3)
+    return scores
 
 
 def _estimate_swing(onset_times: np.ndarray) -> float | None:
@@ -119,10 +170,14 @@ def analyze(bundle: AudioBundle) -> TempoFeatures:
     # 4. Swing
     swing_ratio = _estimate_swing(np.asarray(onset_times))
 
+    # 5. Scoring des hypothèses BPM via autocorrelation
+    hyp_scores = _score_bpm_hypotheses(onset_env, sr, hop_length, bpm)
+
     return TempoFeatures(
         bpm=round(bpm, 2),
         bpm_confidence=round(confidence, 3),
         beat_consistency=round(consistency, 3),
         onset_density=round(onset_density, 2),
         swing_ratio=swing_ratio,
+        bpm_hypothesis_scores=hyp_scores,
     )

@@ -212,7 +212,9 @@ def get_playlist(spotify_id: str, session: SessionDep) -> PlaylistDetailOut:
             is_overridden=override is not None,
             confidence_low=confidence_low,
             confidence_reasons=confidence_reasons,
-            bpm_alt_hypotheses=bpm_alt_hypotheses(tempo.get("bpm")),
+            bpm_alt_hypotheses=bpm_alt_hypotheses(
+                tempo.get("bpm"), tempo.get("bpm_hypothesis_scores"),
+            ),
         )
 
     tracks_out = [_track_to_out(pt) for pt in pt_rows]
